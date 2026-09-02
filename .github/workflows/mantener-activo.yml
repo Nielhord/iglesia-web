@@ -1,0 +1,42 @@
+name: Mantener servicios activos
+
+# Supabase (Free) se pausa a los 7 dias sin actividad y Atlas (M0) a los 60.
+# Este trabajo los toca cada lunes para reiniciar ambos contadores.
+#
+# Requiere estos secretos en el repositorio
+# (Settings -> Secrets and variables -> Actions -> New repository secret):
+#   MONGO_URI
+#   SUPABASE_URL
+#   SUPABASE_SERVICE_ROLE_KEY
+#   SUPABASE_BUCKET   (opcional, por defecto "archivos")
+#
+# Aviso: GitHub desactiva los workflows programados si el repositorio pasa
+# 60 dias sin actividad. Avisa por email; con cualquier push se reactivan.
+
+on:
+  schedule:
+    - cron: '0 12 * * 1'   # lunes 12:00 UTC (08:00 en Chile continental)
+  workflow_dispatch:        # permite lanzarlo a mano desde la pestana Actions
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar dependencias
+        run: npm ci --omit=dev
+
+      - name: Despertar MongoDB y Supabase
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_BUCKET: ${{ secrets.SUPABASE_BUCKET }}
+        run: node scripts/mantener-activo.js

@@ -1,0 +1,27 @@
+# Dependencias
+node_modules/
+
+# Variables de entorno (NUNCA subir: contienen credenciales)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editores
+.vscode/*
+!.vscode/settings.json
+.idea/
+
+# Temporales
+tmp/
+uploads/
