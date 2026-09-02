@@ -28,7 +28,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # 22 o superior: @supabase/supabase-js necesita WebSocket nativo,
+          # que no existe en Node 20. Coincide con la version de desarrollo.
+          node-version: '24'
 
       - name: Instalar dependencias
         run: npm ci --omit=dev
