@@ -679,6 +679,123 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
   }
 
   /* ══════════════════════════════════════════════ */
+  seccion('Panel de rama: calendario y avisos (coro.html)');
+  {
+    const Actividad = require('../models/Actividad');
+    const Aviso = require('../models/Aviso');
+    const sesionEditor = await iniciarSesion('editor@iedp.cl');
+
+    // Una actividad en el mes que el calendario abre por defecto (el actual),
+    // para que salga sin tener que navegar entre meses.
+    const hoy = new Date();
+    const dos = n => String(n).padStart(2, '0');
+    const dia = `${hoy.getFullYear()}-${dos(hoy.getMonth() + 1)}-15`;
+
+    await Actividad.create({
+      titulo: 'Ensayo del coro', categoria: 'Coro', fecha: dia,
+      hora: '19:30', lugar: 'Templo central', descripcion: 'Traer partituras.',
+      creadoPor: autor._id
+    });
+    await Aviso.create({
+      titulo: 'Suspendido el sábado', cuerpo: 'No hay ensayo este sábado.',
+      categoria: 'Coro', fijado: true, creadoPor: autor._id
+    });
+
+    {
+      const { doc, errs, dom } = await abrir('coro.html', 2000, lector);
+      comprobar('La rama carga sin errores de JS', errs.length === 0, errs[0]);
+
+      comprobar('Tiene las dos columnas', !!doc.querySelector('.rama-columnas'));
+      comprobar('Los documentos van en una caja con scroll propio',
+        !!doc.querySelector('.rama-scroll [data-documentos], .rama-scroll .documentos-lista'));
+      // Las secciones anteriores editan documentos, así que el número exacto
+      // se pregunta a la base en vez de fijarlo a mano.
+      const enBase = await Documento.countDocuments({ categoria: 'Coro' });
+      comprobar('Los documentos de la rama siguen listándose',
+        doc.querySelectorAll('.rama-scroll .documento-card').length === enBase && enBase > 0,
+        `${doc.querySelectorAll('.rama-scroll .documento-card').length} tarjetas, ${enBase} en base`);
+
+      const pestanas = [...doc.querySelectorAll('.rama-pestana')].map(b => b.textContent);
+      comprobar('Ofrece las pestañas Calendario y Avisos',
+        pestanas.join(',') === 'Calendario,Avisos', pestanas.join(','));
+
+      comprobar('Pinta la rejilla del mes',
+        doc.querySelectorAll('.cal-celda:not(.cal-celda-vacia)').length >= 28,
+        `${doc.querySelectorAll('.cal-celda:not(.cal-celda-vacia)').length} días`);
+      comprobar('Marca el día que tiene actividad',
+        doc.querySelectorAll('.cal-con-actividad').length === 1,
+        `${doc.querySelectorAll('.cal-con-actividad').length} días marcados`);
+      comprobar('Lista la actividad del mes',
+        /Ensayo del coro/.test(doc.querySelector('.agenda-lista').textContent));
+      comprobar('Muestra la hora y el lugar',
+        /19:30/.test(doc.body.textContent) && /Templo central/.test(doc.body.textContent));
+
+      // La pestaña de avisos empieza oculta y se abre al pulsarla.
+      comprobar('La vista de avisos empieza oculta',
+        doc.querySelector('[data-vista="avisos"]').hidden);
+      [...doc.querySelectorAll('.rama-pestana')].find(b => b.textContent === 'Avisos').click();
+      comprobar('Al pulsar "Avisos" se muestra esa vista',
+        !doc.querySelector('[data-vista="avisos"]').hidden
+          && doc.querySelector('[data-vista="calendario"]').hidden);
+      comprobar('Muestra el aviso', /Suspendido el sábado/.test(doc.body.textContent));
+      comprobar('Marca el aviso fijado', !!doc.querySelector('.aviso-fijado'));
+
+      // Un miembro solo mira.
+      comprobar('Un miembro NO ve el botón de crear',
+        !doc.querySelector('.rama-btn-nuevo'), 'aparece el botón');
+      comprobar('Un miembro NO ve botones de editar ni eliminar',
+        doc.querySelectorAll('.rama-acciones').length === 0);
+      dom.window.close();
+    }
+
+    {
+      const { w, doc, errs, dom } = await abrir('coro.html', 2000, sesionEditor);
+      comprobar('coro.html carga sin errores para el editor', errs.length === 0, errs[0]);
+      comprobar('El editor SÍ ve el botón de crear', !!doc.querySelector('.rama-btn-nuevo'));
+      comprobar('El editor ve editar/eliminar en la actividad',
+        doc.querySelectorAll('[data-vista="calendario"] .rama-acciones .btn-editar').length === 1,
+        `${doc.querySelectorAll('[data-vista="calendario"] .rama-acciones .btn-editar').length}`);
+      comprobar('Y también en el aviso',
+        doc.querySelectorAll('[data-vista="avisos"] .rama-acciones .btn-eliminar').length === 1);
+
+      // Crear una actividad de verdad desde el formulario.
+      doc.querySelector('.rama-btn-nuevo').click();
+      const form = doc.querySelector('.rama-form');
+      comprobar('El botón despliega el formulario', form && !form.hidden);
+
+      const entradas = form.querySelectorAll('input');
+      entradas[0].value = 'Reunión de directiva';   // título
+      entradas[1].value = `${hoy.getFullYear()}-${dos(hoy.getMonth() + 1)}-20`;
+      form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+      await esperar(1500);
+
+      const guardada = await Actividad.findOne({ titulo: 'Reunión de directiva' });
+      comprobar('La actividad nueva llega a la base de datos', !!guardada);
+      comprobar('Se guarda con la categoría de la rama', guardada?.categoria === 'Coro', guardada?.categoria);
+      comprobar('Aparece en el calendario sin recargar la página',
+        /Reunión de directiva/.test(doc.querySelector('.agenda-lista').textContent));
+      comprobar('Ahora hay dos días marcados',
+        doc.querySelectorAll('.cal-con-actividad').length === 2,
+        `${doc.querySelectorAll('.cal-con-actividad').length}`);
+      dom.window.close();
+    }
+
+    {
+      // Sin sesión: el calendario y los avisos se leen; los documentos no.
+      const { doc, errs, dom } = await abrir('coro.html', 2000);
+      comprobar('La rama carga sin errores para un anónimo', errs.length === 0, errs[0]);
+      comprobar('El calendario se ve sin iniciar sesión',
+        /Ensayo del coro/.test(doc.querySelector('.agenda-lista').textContent));
+      comprobar('Los documentos siguen bloqueados', !!doc.querySelector('.acceso-aviso'));
+      comprobar('Y no se filtra ningún documento',
+        doc.querySelectorAll('.documento-card').length === 0);
+      comprobar('Un anónimo tampoco ve botones de gestión',
+        !doc.querySelector('.rama-btn-nuevo'));
+      dom.window.close();
+    }
+  }
+
+  /* ══════════════════════════════════════════════ */
   seccion('Backend caído: el frontend no debe romperse');
   {
     await new Promise(r => api.close(r));

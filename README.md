@@ -54,16 +54,21 @@ El servidor no arranca si falta alguna obligatoria.
 
 ## Roles
 
-| Rol | Documentos | Usuarios y aprobaciones |
-|---|---|---|
-| sin sesión | nada: ve el aviso de acceso | — |
-| `miembro` | ver y descargar | — |
-| `editor` | ver, descargar, subir, editar y borrar | — |
-| `admin` | lo mismo que `editor` | acceso completo |
+| Rol | Calendario y avisos | Documentos | Usuarios y aprobaciones |
+|---|---|---|---|
+| sin sesión | leer | nada: ve el aviso de acceso | — |
+| `miembro` | leer | ver y descargar | — |
+| `editor` | crear, editar y borrar | ver, descargar, subir, editar y borrar | — |
+| `admin` | lo mismo que `editor` | lo mismo que `editor` | acceso completo |
 
 `miembro` es el rol por defecto al registrarse. Lo único que separa a un
 `admin` de un `editor` es la gestión de cuentas y la aprobación de registros:
-sobre los documentos tienen exactamente los mismos permisos.
+sobre los documentos, las actividades y los avisos tienen exactamente los
+mismos permisos.
+
+El calendario y los avisos son lo único que se lee sin cuenta. Son
+información que la iglesia publica hacia fuera: cuándo se reúne cada rama y
+qué anuncia. Los documentos, en cambio, son material interno.
 
 ## Aprobación de registros
 
@@ -160,6 +165,37 @@ ya funciona por sí sola: exigir token ahí rompería las descargas sin proteger
 nada. Lo que sí impide el `401` del listado es *descubrir* esas URLs. Si en
 algún momento hace falta que los archivos también sean privados, hay que pasar
 el bucket a privado y firmar URLs temporales, no tocar esta ruta.
+
+### Actividades del calendario
+
+| Método | Ruta | Acceso |
+|---|---|---|
+| `GET` | `/api/actividades?categoria=Coro&desde=2026-09-01&hasta=2026-09-30` | público |
+| `POST` | `/api/actividades` | editor/admin |
+| `PUT` | `/api/actividades/:id` | editor/admin |
+| `DELETE` | `/api/actividades/:id` | editor/admin |
+
+Campos: `titulo` y `fecha` obligatorios; `descripcion`, `hora` (`HH:MM`) y
+`lugar` opcionales. `desde` y `hasta` van en `YYYY-MM-DD`; el calendario del
+frontend pide siempre el mes que se está mirando.
+
+**La fecha es un día, no un instante.** Se guarda y se compara en UTC, y el
+frontend la lee con `.slice(0, 10)`. Si se guardara en hora local, una
+actividad del día 1 aparecería el día 31 del mes anterior para quien mira
+desde Chile. Por eso ni el servidor ni el cliente convierten husos: tratan el
+campo como lo que es, una casilla del calendario.
+
+### Avisos
+
+| Método | Ruta | Acceso |
+|---|---|---|
+| `GET` | `/api/avisos?categoria=Coro` | público |
+| `POST` | `/api/avisos` | editor/admin |
+| `PUT` | `/api/avisos/:id` | editor/admin |
+| `DELETE` | `/api/avisos/:id` | editor/admin |
+
+Campos: `titulo` y `cuerpo` obligatorios, `fijado` opcional. Los avisos
+fijados salen primero; el resto, del más nuevo al más viejo.
 
 ```bash
 curl -X POST http://localhost:3000/api/documentos \

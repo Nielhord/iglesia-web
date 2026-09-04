@@ -1,6 +1,5 @@
 const mongoose = require('mongoose');
-
-const CATEGORIAS = ['Varones', 'Dorcas', 'Jovenes', 'Coro', 'EBD', 'General'];
+const { CATEGORIAS, ERROR_CATEGORIA } = require('../config/categorias');
 
 const documentoSchema = new mongoose.Schema({
   titulo: {
@@ -19,10 +18,7 @@ const documentoSchema = new mongoose.Schema({
 
   categoria: {
     type: String,
-    enum: {
-      values: CATEGORIAS,
-      message: `La categoría debe ser una de: ${CATEGORIAS.join(', ')}`
-    },
+    enum: { values: CATEGORIAS, message: ERROR_CATEGORIA },
     required: [true, 'La categoría es obligatoria']
   },
 

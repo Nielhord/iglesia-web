@@ -484,6 +484,129 @@ function seccion(t) { console.log(`\n\x1b[1m── ${t} ──\x1b[0m`); }
   await Documento.deleteMany({});
 
   /* ══════════════════════════════════════════════ */
+  seccion('Actividades del calendario');
+
+  // Leer el calendario es abierto: una visita puede ver qué hay programado.
+  r = await pedir('/api/actividades');
+  comprobar('GET /api/actividades sin token → 200', r.status === 200, `status ${r.status}`);
+  comprobar('Responde con un array de actividades', Array.isArray(r.body.actividades));
+
+  r = await pedir('/api/actividades?categoria=NoExiste');
+  comprobar('Categoría inválida → 400', r.status === 400, `status ${r.status}`);
+
+  r = await pedir('/api/actividades?desde=05-09-2026');
+  comprobar('Fecha con formato raro → 400 (no 500)', r.status === 400, `status ${r.status}`);
+
+  // Escribir, no.
+  const nuevaActividad = {
+    titulo: 'Ensayo general', categoria: 'Coro',
+    fecha: '2026-09-05', hora: '19:30', lugar: 'Templo central'
+  };
+
+  r = await pedir('/api/actividades', json('POST', nuevaActividad));
+  comprobar('Crear sin token → 401', r.status === 401, `status ${r.status}`);
+
+  r = await pedir('/api/actividades', json('POST', nuevaActividad, conToken(tokenMiembro)));
+  comprobar('Un miembro NO puede crear actividades → 403', r.status === 403, `status ${r.status}`);
+
+  r = await pedir('/api/actividades', json('POST', nuevaActividad, conToken(tokenEditor)));
+  comprobar('Un editor SÍ puede crear → 201', r.status === 201, `status ${r.status}`);
+  const actividadId = r.body.actividad?._id;
+
+  // La fecha es un día del calendario, no un instante: si se guardara en hora
+  // local, un huso negativo la dejaría en el día 4.
+  comprobar('Guarda el día exacto que se pidió, sin correrlo de huso',
+    String(r.body.actividad?.fecha || '').slice(0, 10) === '2026-09-05',
+    r.body.actividad?.fecha);
+  comprobar('Devuelve el autor sin filtrar su email',
+    r.body.actividad?.creadoPor?.nombre === 'Editor' && !r.body.actividad?.creadoPor?.email,
+    JSON.stringify(r.body.actividad?.creadoPor));
+
+  r = await pedir('/api/actividades', json('POST', { categoria: 'Coro', fecha: '2026-09-05' },
+    conToken(tokenEditor)));
+  comprobar('Actividad sin título → 400', r.status === 400, `status ${r.status}`);
+
+  r = await pedir('/api/actividades', json('POST',
+    { ...nuevaActividad, categoria: 'Inventada' }, conToken(tokenEditor)));
+  comprobar('Actividad con categoría inválida → 400', r.status === 400, `status ${r.status}`);
+
+  r = await pedir('/api/actividades', json('POST',
+    { ...nuevaActividad, hora: '25:99' }, conToken(tokenEditor)));
+  comprobar('Hora imposible → 400', r.status === 400, `status ${r.status}`);
+
+  r = await pedir(`/api/actividades/${actividadId}`,
+    json('PUT', { titulo: 'Ensayo movido', hora: '20:00' }, conToken(tokenEditor)));
+  comprobar('Un editor puede corregir una actividad → 200', r.status === 200, `status ${r.status}`);
+  comprobar('El cambio se guarda', r.body.actividad?.titulo === 'Ensayo movido', r.body.actividad?.titulo);
+
+  r = await pedir(`/api/actividades/${actividadId}`, json('PUT', { colado: 'x' }, conToken(tokenEditor)));
+  comprobar('PUT sin campos editables → 400', r.status === 400, `status ${r.status}`);
+
+  r = await pedir('/api/actividades/000000000000000000000000',
+    json('PUT', { titulo: 'x' }, conToken(tokenAdmin)));
+  comprobar('PUT sobre una actividad inexistente → 404', r.status === 404, `status ${r.status}`);
+
+  // El calendario pide un mes concreto: lo de otro mes no debe aparecer.
+  await pedir('/api/actividades', json('POST',
+    { titulo: 'Retiro de octubre', categoria: 'Coro', fecha: '2026-10-10' }, conToken(tokenEditor)));
+
+  r = await pedir('/api/actividades?categoria=Coro&desde=2026-09-01&hasta=2026-09-30');
+  comprobar('El rango de fechas deja fuera lo de otro mes',
+    r.body.actividades?.length === 1 && r.body.actividades[0].titulo === 'Ensayo movido',
+    `${r.body.actividades?.length} actividades`);
+
+  r = await pedir(`/api/actividades/${actividadId}`, { method: 'DELETE', ...conToken(tokenMiembro) });
+  comprobar('Un miembro NO puede borrar actividades → 403', r.status === 403, `status ${r.status}`);
+
+  r = await pedir(`/api/actividades/${actividadId}`, { method: 'DELETE', ...conToken(tokenAdmin) });
+  comprobar('Un admin puede borrar → 200', r.status === 200, `status ${r.status}`);
+
+  r = await pedir(`/api/actividades/${actividadId}`, { method: 'DELETE', ...conToken(tokenAdmin) });
+  comprobar('Borrar dos veces → 404', r.status === 404, `status ${r.status}`);
+
+  /* ══════════════════════════════════════════════ */
+  seccion('Avisos');
+
+  r = await pedir('/api/avisos');
+  comprobar('GET /api/avisos sin token → 200', r.status === 200, `status ${r.status}`);
+
+  const nuevoAviso = { titulo: 'Cambio de horario', cuerpo: 'El ensayo pasa a las 20:00.', categoria: 'Coro' };
+
+  r = await pedir('/api/avisos', json('POST', nuevoAviso));
+  comprobar('Publicar sin token → 401', r.status === 401, `status ${r.status}`);
+
+  r = await pedir('/api/avisos', json('POST', nuevoAviso, conToken(tokenMiembro)));
+  comprobar('Un miembro NO puede publicar avisos → 403', r.status === 403, `status ${r.status}`);
+
+  r = await pedir('/api/avisos', json('POST', nuevoAviso, conToken(tokenEditor)));
+  comprobar('Un editor SÍ puede publicar → 201', r.status === 201, `status ${r.status}`);
+  const avisoId = r.body.aviso?._id;
+  comprobar('Un aviso nace sin fijar', r.body.aviso?.fijado === false, String(r.body.aviso?.fijado));
+
+  r = await pedir('/api/avisos', json('POST', { titulo: 'Vacío', categoria: 'Coro' }, conToken(tokenEditor)));
+  comprobar('Aviso sin cuerpo → 400', r.status === 400, `status ${r.status}`);
+
+  // Un aviso más nuevo, pero sin fijar: el fijado debe ganarle igualmente.
+  await pedir('/api/avisos', json('POST',
+    { titulo: 'Aviso reciente', cuerpo: 'Publicado después.', categoria: 'Coro' }, conToken(tokenEditor)));
+
+  r = await pedir(`/api/avisos/${avisoId}`, json('PUT', { fijado: true }, conToken(tokenAdmin)));
+  comprobar('Un admin puede fijar un aviso → 200', r.status === 200, `status ${r.status}`);
+  comprobar('Queda marcado como fijado', r.body.aviso?.fijado === true);
+  comprobar('Registra cuándo se editó', !!r.body.aviso?.actualizadoEn);
+
+  r = await pedir('/api/avisos?categoria=Coro');
+  comprobar('El aviso fijado va primero, aunque sea el más antiguo',
+    r.body.avisos?.[0]?.titulo === 'Cambio de horario',
+    r.body.avisos?.map(a => a.titulo).join(' | '));
+
+  r = await pedir(`/api/avisos/${avisoId}`, { method: 'DELETE', ...conToken(tokenMiembro) });
+  comprobar('Un miembro NO puede borrar avisos → 403', r.status === 403, `status ${r.status}`);
+
+  r = await pedir(`/api/avisos/${avisoId}`, { method: 'DELETE', ...conToken(tokenEditor) });
+  comprobar('Un editor puede borrar → 200', r.status === 200, `status ${r.status}`);
+
+  /* ══════════════════════════════════════════════ */
   seccion('Límite de intentos de login');
 
   let golpe429 = 0;

@@ -2,7 +2,9 @@ const express = require('express');
 const authRoutes = require('./authRoutes');
 const usuarioRoutes = require('./usuarioRoutes');
 const documentoRoutes = require('./documentoRoutes');
-const { CATEGORIAS } = require('../models/Documento');
+const actividadRoutes = require('./actividadRoutes');
+const avisoRoutes = require('./avisoRoutes');
+const { CATEGORIAS } = require('../config/categorias');
 
 const router = express.Router();
 
@@ -31,6 +33,18 @@ router.get('/', (req, res) => {
         'POST   /api/documentos           (editor/admin, multipart: file)',
         'PUT    /api/documentos/:id       (editor/admin)',
         'DELETE /api/documentos/:id       (editor/admin)'
+      ],
+      actividades: [
+        'GET    /api/actividades?categoria=Coro&desde=2026-09-01&hasta=2026-09-30',
+        'POST   /api/actividades          (editor/admin)',
+        'PUT    /api/actividades/:id      (editor/admin)',
+        'DELETE /api/actividades/:id      (editor/admin)'
+      ],
+      avisos: [
+        'GET    /api/avisos?categoria=Coro',
+        'POST   /api/avisos               (editor/admin)',
+        'PUT    /api/avisos/:id           (editor/admin)',
+        'DELETE /api/avisos/:id           (editor/admin)'
       ]
     }
   });
@@ -39,5 +53,7 @@ router.get('/', (req, res) => {
 router.use('/auth', authRoutes);
 router.use('/usuarios', usuarioRoutes);
 router.use('/documentos', documentoRoutes);
+router.use('/actividades', actividadRoutes);
+router.use('/avisos', avisoRoutes);
 
 module.exports = router;
