@@ -176,8 +176,10 @@ el bucket a privado y firmar URLs temporales, no tocar esta ruta.
 | `DELETE` | `/api/actividades/:id` | editor/admin |
 
 Campos: `titulo` y `fecha` obligatorios; `descripcion`, `hora` (`HH:MM`) y
-`lugar` opcionales. `desde` y `hasta` van en `YYYY-MM-DD`; el calendario del
-frontend pide siempre el mes que se está mirando.
+`lugar` opcionales. `desde` y `hasta` van en `YYYY-MM-DD`; la agenda del
+frontend pide siempre el mes que se está mirando, y las muestra en el orden
+que devuelve la API: por fecha y hora ascendente, de lo más cercano a lo más
+lejano.
 
 **La fecha es un día, no un instante.** Se guarda y se compara en UTC, y el
 frontend la lee con `.slice(0, 10)`. Si se guardara en hora local, una

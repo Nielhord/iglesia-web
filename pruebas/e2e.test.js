@@ -719,16 +719,20 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
       comprobar('Ofrece las pestañas Calendario y Avisos',
         pestanas.join(',') === 'Calendario,Avisos', pestanas.join(','));
 
-      comprobar('Pinta la rejilla del mes',
-        doc.querySelectorAll('.cal-celda:not(.cal-celda-vacia)').length >= 28,
-        `${doc.querySelectorAll('.cal-celda:not(.cal-celda-vacia)').length} días`);
-      comprobar('Marca el día que tiene actividad',
-        doc.querySelectorAll('.cal-con-actividad').length === 1,
-        `${doc.querySelectorAll('.cal-con-actividad').length} días marcados`);
+      const mesActual = new Intl.DateTimeFormat('es', { month: 'long' }).format(hoy);
+      comprobar('Encabeza con el mes y el año',
+        doc.querySelector('.cal-mes').textContent === `${mesActual} ${hoy.getFullYear()}`,
+        doc.querySelector('.cal-mes').textContent);
+      comprobar('Se puede cambiar de mes', doc.querySelectorAll('.cal-flecha').length === 2);
+
       comprobar('Lista la actividad del mes',
         /Ensayo del coro/.test(doc.querySelector('.agenda-lista').textContent));
-      comprobar('Muestra la hora y el lugar',
-        /19:30/.test(doc.body.textContent) && /Templo central/.test(doc.body.textContent));
+      comprobar('Cada actividad lleva su día en grande',
+        doc.querySelector('.agenda-item .agenda-dia-numero')?.textContent === '15',
+        doc.querySelector('.agenda-item .agenda-dia-numero')?.textContent);
+      comprobar('Muestra la fecha completa, la hora y el lugar en texto',
+        /15 de .+ · 19:30 · Templo central/.test(doc.querySelector('.agenda-detalle').textContent),
+        doc.querySelector('.agenda-detalle').textContent);
 
       // La pestaña de avisos empieza oculta y se abre al pulsarla.
       comprobar('La vista de avisos empieza oculta',
@@ -772,11 +776,16 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
       const guardada = await Actividad.findOne({ titulo: 'Reunión de directiva' });
       comprobar('La actividad nueva llega a la base de datos', !!guardada);
       comprobar('Se guarda con la categoría de la rama', guardada?.categoria === 'Coro', guardada?.categoria);
-      comprobar('Aparece en el calendario sin recargar la página',
+      comprobar('Aparece en la lista sin recargar la página',
         /Reunión de directiva/.test(doc.querySelector('.agenda-lista').textContent));
-      comprobar('Ahora hay dos días marcados',
-        doc.querySelectorAll('.cal-con-actividad').length === 2,
-        `${doc.querySelectorAll('.cal-con-actividad').length}`);
+      comprobar('Ahora hay dos actividades en el mes',
+        doc.querySelectorAll('.agenda-item').length === 2,
+        `${doc.querySelectorAll('.agenda-item').length}`);
+      // El día 15 se creó antes que el 20, pero manda la fecha, no el orden
+      // de creación.
+      comprobar('Se ordenan por fecha: primero la más cercana',
+        [...doc.querySelectorAll('.agenda-dia-numero')].map(e => e.textContent).join(',') === '15,20',
+        [...doc.querySelectorAll('.agenda-dia-numero')].map(e => e.textContent).join(','));
       dom.window.close();
     }
 
