@@ -56,6 +56,7 @@ El servidor no arranca si falta alguna obligatoria.
 
 | Rol | Documentos | Usuarios y aprobaciones |
 |---|---|---|
+| sin sesión | nada: ve el aviso de acceso | — |
 | `miembro` | ver y descargar | — |
 | `editor` | ver, descargar, subir, editar y borrar | — |
 | `admin` | lo mismo que `editor` | acceso completo |
@@ -136,14 +137,29 @@ cambiarle el nombre a una cuenta antigua la dejaba sin poder iniciar sesión.
 
 | Método | Ruta | Acceso |
 |---|---|---|
-| `GET` | `/api/documentos?categoria=Coro&pagina=1&limite=20` | público |
-| `GET` | `/api/documentos/:id` | público |
-| `GET` | `/api/documentos/:id/descargar` | público |
+| `GET` | `/api/documentos?categoria=Coro&pagina=1&limite=20` | con sesión |
+| `GET` | `/api/documentos/:id` | con sesión |
+| `GET` | `/api/documentos/:id/descargar` | público (ver abajo) |
 | `POST` | `/api/documentos` | editor/admin |
 | `PUT` | `/api/documentos/:id` | editor/admin |
 | `DELETE` | `/api/documentos/:id` | editor/admin |
 
 Categorías válidas: `Varones`, `Dorcas`, `Jovenes`, `Coro`, `EBD`, `General`.
+
+**Leer el catálogo exige sesión.** Sirve cualquier cuenta aprobada, sin
+importar el rol: el requisito es estar dentro, no ser editor. En el frontend,
+`js/acceso.js` detecta la falta de sesión en `documentos.html` y en las cinco
+páginas de rama, y deja la zona en gris con un aviso y un enlace a
+`login.html?volver=<página>` en vez de pedir a la API un listado que va a
+responder `401`.
+
+La descarga (`/:id/descargar`) se queda sin token a propósito. Es un enlace
+`<a href>` normal, que no puede enviar la cabecera `Authorization`, y lo único
+que hace es redirigir a la URL de Supabase. Como el bucket es público, esa URL
+ya funciona por sí sola: exigir token ahí rompería las descargas sin proteger
+nada. Lo que sí impide el `401` del listado es *descubrir* esas URLs. Si en
+algún momento hace falta que los archivos también sean privados, hay que pasar
+el bucket a privado y firmar URLs temporales, no tocar esta ruta.
 
 ```bash
 curl -X POST http://localhost:3000/api/documentos \

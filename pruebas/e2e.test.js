@@ -60,6 +60,28 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
     });
   }
 
+  // Documentos y ramas dejaron de ser públicos, así que las pruebas de esas
+  // páginas necesitan una sesión desde el principio.
+  const hashComun = await bcrypt.hash('valida123', 12);
+  await User.create({
+    nombre: 'Admin Prueba', email: 'admin@iedp.cl',
+    password: hashComun, rol: 'admin', estado: 'aprobado'
+  });
+  await User.create({
+    nombre: 'Miembro Prueba', email: 'miembro@iedp.cl',
+    password: hashComun, rol: 'miembro', estado: 'aprobado'
+  });
+
+  const iniciarSesion = async (email) => {
+    const r = await fetch('http://localhost:3000/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: 'valida123' })
+    });
+    const datos = await r.json();
+    return { token: datos.token, usuario: datos.usuario };
+  };
+
   /* ---------- Servidor estático del frontend ---------- */
   const estatico = http.createServer((req, res) => {
     const limpio = decodeURIComponent(req.url.split('?')[0]);
@@ -71,6 +93,8 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
     fs.createReadStream(destino).pipe(res);
   }).listen(5500);
   await new Promise(r => estatico.once('listening', r));
+
+  const lector = await iniciarSesion('miembro@iedp.cl');
 
   /* ---------- Cargador de páginas en jsdom ---------- */
   // 'sesion' permite dejar el token en localStorage ANTES de que corran los
@@ -142,7 +166,7 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
 
   seccion('Listado de documentos (documentos.html)');
   {
-    const { w, doc, errs, dom } = await abrir('documentos.html', 2000);
+    const { w, doc, errs, dom } = await abrir('documentos.html', 2000, lector);
     comprobar('Carga sin errores de JavaScript', errs.length === 0, errs[0]);
     comprobar('Título propio', doc.title === 'Documentos | IEDP Talca', doc.title);
 
@@ -188,7 +212,7 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
 
   seccion('Página de rama (coro.html)');
   {
-    const { doc, errs, dom } = await abrir('coro.html', 1800);
+    const { doc, errs, dom } = await abrir('coro.html', 1800, lector);
     comprobar('Carga sin errores', errs.length === 0, errs[0]);
     comprobar('Título propio', doc.title === 'Coro Instrumental | IEDP Talca', doc.title);
     comprobar('Lista solo los documentos de la categoría Coro',
@@ -202,7 +226,7 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
 
   seccion('Página sin documentos (dorcas.html)');
   {
-    const { doc, dom } = await abrir('dorcas.html', 1800);
+    const { doc, dom } = await abrir('dorcas.html', 1800, lector);
     comprobar('Muestra estado vacío en vez de quedarse en blanco',
       /Todavía no hay documentos/.test(doc.body.textContent));
     comprobar('No deja el mensaje de "Cargando" colgado',
@@ -210,6 +234,63 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
     dom.window.close();
   }
 
+  seccion('Sin sesión: documentos y ramas quedan bloqueados');
+  {
+    // Sin token, js/acceso.js sustituye el listado por el aviso gris antes de
+    // que js/documentos.js llegue siquiera a pedir nada a la API.
+    const { doc, errs, dom } = await abrir('documentos.html', 1800);
+    comprobar('documentos.html carga sin errores de JS', errs.length === 0, errs[0]);
+
+    comprobar('Muestra el aviso de acceso', !!doc.querySelector('.acceso-aviso'));
+    comprobar('Explica que hace falta iniciar sesión',
+      /Necesitas iniciar sesión/.test(doc.body.textContent));
+
+    comprobar('NO pinta ningún documento',
+      doc.querySelectorAll('.documento-card').length === 0,
+      `${doc.querySelectorAll('.documento-card').length} tarjetas`);
+    comprobar('NO filtra títulos reales al anónimo',
+      !doc.body.textContent.includes('En nombre de Jesús'));
+    comprobar('NO muestra los filtros de categoría',
+      doc.querySelectorAll('.filtro-btn').length === 0);
+    comprobar('No deja colgado el mensaje de "Cargando"',
+      !/Cargando documentos/.test(doc.body.textContent));
+
+    const irALogin = doc.querySelector('.acceso-acciones a[href^="login.html"]');
+    comprobar('Ofrece un enlace a login.html', !!irALogin, 'sin enlace');
+    comprobar('El enlace vuelve a documentos.html tras entrar',
+      irALogin && irALogin.getAttribute('href') === 'login.html?volver=documentos.html',
+      irALogin?.getAttribute('href'));
+    comprobar('Ofrece también registrarse',
+      !!doc.querySelector('.acceso-acciones a[href="register.html"]'));
+
+    const fantasma = doc.querySelector('.acceso-fantasma');
+    comprobar('Pinta tarjetas grises de relleno', !!fantasma);
+    comprobar('El relleno se oculta a los lectores de pantalla',
+      fantasma && fantasma.getAttribute('aria-hidden') === 'true');
+
+    comprobar('La navbar sigue disponible para navegar',
+      !!doc.querySelector('#navbar .custom-navbar'));
+    dom.window.close();
+  }
+  {
+    // Las ramas usan el mismo guardián, con su propio destino de vuelta.
+    const { doc, errs, dom } = await abrir('coro.html', 1800);
+    comprobar('coro.html carga sin errores de JS', errs.length === 0, errs[0]);
+    comprobar('La rama también queda bloqueada', !!doc.querySelector('.acceso-aviso'));
+    comprobar('NO lista los documentos de Coro',
+      doc.querySelectorAll('.documento-card').length === 0);
+    comprobar('El enlace de login vuelve a coro.html',
+      doc.querySelector('.acceso-acciones a[href^="login.html"]')?.getAttribute('href')
+        === 'login.html?volver=coro.html');
+    dom.window.close();
+  }
+  {
+    // El bloqueo es solo la cara visible: quien borre el aviso no gana nada.
+    const r = await fetch('http://localhost:3000/api/documentos');
+    comprobar('La API rechaza el listado sin token → 401', r.status === 401, `status ${r.status}`);
+  }
+
+  /* ══════════════════════════════════════════════ */
   seccion('Registro e inicio de sesión (flujo real)');
   {
     const { w, doc, errs, dom } = await abrir('register.html');
@@ -274,25 +355,7 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
   /* ══════════════════════════════════════════════ */
   seccion('Aprobación de registros (aprobaciones.html)');
   {
-    const hash = await bcrypt.hash('valida123', 12);
-    await User.create({
-      nombre: 'Admin Prueba', email: 'admin@iedp.cl',
-      password: hash, rol: 'admin', estado: 'aprobado'
-    });
-    await User.create({
-      nombre: 'Miembro Prueba', email: 'miembro@iedp.cl',
-      password: hash, rol: 'miembro', estado: 'aprobado'
-    });
-
-    const entrar = async (email) => {
-      const r = await fetch('http://localhost:3000/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: 'valida123' })
-      });
-      const datos = await r.json();
-      return { token: datos.token, usuario: datos.usuario };
-    };
+    const entrar = iniciarSesion;
 
     const sesionAdmin = await entrar('admin@iedp.cl');
     const sesionMiembro = await entrar('miembro@iedp.cl');
@@ -619,7 +682,7 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
   seccion('Backend caído: el frontend no debe romperse');
   {
     await new Promise(r => api.close(r));
-    const { doc, errs, dom } = await abrir('documentos.html', 2000);
+    const { doc, errs, dom } = await abrir('documentos.html', 2000, lector);
     comprobar('La página sigue cargando sin errores de JS', errs.length === 0, errs[0]);
     comprobar('Muestra un mensaje de error legible',
       /No se pudo conectar con el servidor/.test(doc.body.textContent),

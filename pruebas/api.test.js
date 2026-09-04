@@ -360,20 +360,37 @@ function seccion(t) { console.log(`\n\x1b[1m── ${t} ──\x1b[0m`); }
   comprobar('El registro anterior creó el usuario con rol "miembro"', !usr || usr.rol === 'miembro', usr?.rol);
 
   /* ══════════════════════════════════════════════ */
-  seccion('Documentos: lectura pública');
+  seccion('Documentos: la lectura exige sesión');
 
+  // El listado dejó de ser público: es material interno de la congregación.
   r = await pedir('/api/documentos');
-  comprobar('GET /api/documentos es público → 200', r.status === 200, `status ${r.status}`);
-  comprobar('Responde con paginación', typeof r.body.paginas === 'number');
+  comprobar('GET /api/documentos sin token → 401', r.status === 401, `status ${r.status}`);
 
-  r = await pedir('/api/documentos?categoria=CategoriaFalsa');
-  comprobar('Categoría inválida → 400', r.status === 400, `status ${r.status}`);
-
-  r = await pedir('/api/documentos/no-es-un-id');
-  comprobar('ID mal formado → 400 (no 500)', r.status === 400, `status ${r.status}`);
+  r = await pedir('/api/documentos', conToken('esto-no-es-un-token'));
+  comprobar('GET /api/documentos con token basura → 401', r.status === 401, `status ${r.status}`);
 
   r = await pedir('/api/documentos/000000000000000000000000');
+  comprobar('GET /api/documentos/:id sin token → 401', r.status === 401, `status ${r.status}`);
+
+  // Un miembro corriente sí puede leer: el requisito es tener sesión, no rol.
+  r = await pedir('/api/documentos', conToken(tokenMiembro));
+  comprobar('GET /api/documentos con sesión de miembro → 200', r.status === 200, `status ${r.status}`);
+  comprobar('Responde con paginación', typeof r.body.paginas === 'number');
+
+  r = await pedir('/api/documentos?categoria=CategoriaFalsa', conToken(tokenMiembro));
+  comprobar('Categoría inválida → 400', r.status === 400, `status ${r.status}`);
+
+  r = await pedir('/api/documentos/no-es-un-id', conToken(tokenMiembro));
+  comprobar('ID mal formado → 400 (no 500)', r.status === 400, `status ${r.status}`);
+
+  r = await pedir('/api/documentos/000000000000000000000000', conToken(tokenMiembro));
   comprobar('ID inexistente → 404', r.status === 404, `status ${r.status}`);
+
+  // La descarga se deja sin token a propósito: es un <a href> que no puede
+  // mandar cabeceras, y solo redirige a una URL de Supabase que ya es pública.
+  r = await pedir('/api/documentos/000000000000000000000000/descargar');
+  comprobar('La descarga sigue sin exigir token (404, no 401)',
+    r.status === 404, `status ${r.status}`);
 
   /* ══════════════════════════════════════════════ */
   seccion('Documentos: subida');

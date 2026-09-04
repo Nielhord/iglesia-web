@@ -9,9 +9,17 @@ const { limiteSubida } = require('../middleware/rateLimit');
 
 const router = express.Router();
 
-// --- Públicas ---
-router.get('/', listar);
-router.get('/:id', obtener);
+// --- Lectura: hace falta una sesión ---
+// Los documentos son material interno de la congregación. Cualquier cuenta
+// aprobada sirve (miembro, editor o admin); quien no haya iniciado sesión
+// recibe 401 y el frontend le muestra el aviso en vez de un listado vacío.
+router.get('/', validarToken, listar);
+router.get('/:id', validarToken, obtener);
+
+// La descarga queda sin token a propósito: es un enlace <a href> normal, que
+// no puede enviar la cabecera Authorization, y lo único que hace es redirigir
+// a la URL pública de Supabase. Exigir token aquí rompería las descargas sin
+// proteger nada, porque esa URL ya viaja en el listado.
 router.get('/:id/descargar', descargar);
 
 // --- Protegidas ---
