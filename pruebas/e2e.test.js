@@ -139,6 +139,15 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
     const enlaces = [...doc.querySelectorAll('#navbar a[href]')].map(a => a.getAttribute('href'));
     comprobar('La navbar enlaza login.html y register.html',
       enlaces.includes('login.html') && enlaces.includes('register.html'));
+
+    const radio = [...doc.querySelectorAll('#navbar a')].find(a => a.textContent.trim() === 'Radio');
+    comprobar('"Radio" lleva al sitio externo de la emisora',
+      radio?.getAttribute('href') === 'https://gentle-vacherin-1befe6.netlify.app',
+      radio?.getAttribute('href'));
+    comprobar('Se abre en otra pestaña, sin dejar acceso a la ventana original',
+      radio?.getAttribute('target') === '_blank'
+        && (radio?.getAttribute('rel') || '').includes('noopener'),
+      `target=${radio?.getAttribute('target')} rel=${radio?.getAttribute('rel')}`);
     const activo = doc.querySelector('#navbar .nav-link.activo');
     comprobar('Marca "Inicio" como enlace activo', activo && activo.getAttribute('href') === 'index.html',
       activo?.getAttribute('href'));
