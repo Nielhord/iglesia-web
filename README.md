@@ -54,7 +54,7 @@ El servidor no arranca si falta alguna obligatoria.
 
 ## Roles
 
-| Rol | Calendario y avisos | Documentos | Usuarios y aprobaciones |
+| Rol | Calendario, avisos y textos de la portada | Documentos | Usuarios y aprobaciones |
 |---|---|---|---|
 | sin sesión | leer | nada: ve el aviso de acceso | — |
 | `miembro` | leer | ver y descargar | — |
@@ -198,6 +198,25 @@ campo como lo que es, una casilla del calendario.
 
 Campos: `titulo` y `cuerpo` obligatorios, `fijado` opcional. Los avisos
 fijados salen primero; el resto, del más nuevo al más viejo.
+
+### Textos de la portada
+
+| Método | Ruta | Acceso |
+|---|---|---|
+| `GET` | `/api/contenido` | público |
+| `PUT` | `/api/contenido/:clave` | editor/admin |
+
+Trozos de texto que un editor cambia desde el navegador sin tocar el HTML.
+Las claves están declaradas en `config/contenido.js`, junto con su etiqueta,
+su largo máximo y su **texto por defecto**. Hoy hay dos: `versiculo_texto` y `versiculo_referencia`.
+
+`GET` devuelve siempre todas las claves. Las que nadie ha editado salen con su
+valor por defecto, así que la portada nunca aparece vacía, ni con la base
+recién creada. `PUT` hace *upsert*: la fila se crea la primera vez que alguien
+edita esa clave.
+
+Para añadir un texto editable basta con declararlo en `config/contenido.js` y
+poner `data-contenido="<clave>"` en el elemento del HTML.
 
 ```bash
 curl -X POST http://localhost:3000/api/documentos \

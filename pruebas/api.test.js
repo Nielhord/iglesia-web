@@ -607,6 +607,61 @@ function seccion(t) { console.log(`\n\x1b[1m── ${t} ──\x1b[0m`); }
   comprobar('Un editor puede borrar → 200', r.status === 200, `status ${r.status}`);
 
   /* ══════════════════════════════════════════════ */
+  seccion('Textos editables de la portada');
+
+  r = await pedir('/api/contenido');
+  comprobar('GET /api/contenido sin token → 200', r.status === 200, `status ${r.status}`);
+  comprobar('Sirve el versículo por defecto aunque no haya nada guardado',
+    /A la casa de Jehová iremos/.test(r.body.contenido?.versiculo_texto || ''),
+    r.body.contenido?.versiculo_texto);
+  comprobar('Trae también la referencia',
+    r.body.contenido?.versiculo_referencia === 'Salmos 122:1',
+    r.body.contenido?.versiculo_referencia);
+
+  r = await pedir('/api/contenido/versiculo_texto', json('PUT', { valor: 'Colado' }));
+  comprobar('Editar sin token → 401', r.status === 401, `status ${r.status}`);
+
+  r = await pedir('/api/contenido/versiculo_texto',
+    json('PUT', { valor: 'Colado' }, conToken(tokenMiembro)));
+  comprobar('Un miembro NO puede cambiar el versículo → 403', r.status === 403, `status ${r.status}`);
+
+  r = await pedir('/api/contenido/versiculo_texto',
+    json('PUT', { valor: 'El Señor es mi pastor;\nnada me faltará.' }, conToken(tokenEditor)));
+  comprobar('Un editor SÍ puede → 200', r.status === 200, `status ${r.status}`);
+
+  r = await pedir('/api/contenido');
+  comprobar('El cambio se ve al volver a pedirlo',
+    /nada me faltará/.test(r.body.contenido?.versiculo_texto || ''),
+    r.body.contenido?.versiculo_texto);
+  comprobar('Respeta los saltos de línea del versículo',
+    (r.body.contenido?.versiculo_texto || '').includes('\n'));
+  comprobar('La referencia sigue en su valor por defecto',
+    r.body.contenido?.versiculo_referencia === 'Salmos 122:1');
+  comprobar('Anota cuándo se editó', !!r.body.editado?.versiculo_texto);
+
+  // La segunda edición reaprovecha la fila creada por la primera (upsert).
+  r = await pedir('/api/contenido/versiculo_texto',
+    json('PUT', { valor: 'Segunda versión' }, conToken(tokenAdmin)));
+  comprobar('Editar dos veces no duplica ni falla → 200', r.status === 200, `status ${r.status}`);
+  r = await pedir('/api/contenido');
+  comprobar('Se queda la última versión',
+    r.body.contenido?.versiculo_texto === 'Segunda versión',
+    r.body.contenido?.versiculo_texto);
+
+  r = await pedir('/api/contenido/no_existe', json('PUT', { valor: 'x' }, conToken(tokenEditor)));
+  comprobar('Clave desconocida → 404', r.status === 404, `status ${r.status}`);
+
+  r = await pedir('/api/contenido/versiculo_texto', json('PUT', { valor: '   ' }, conToken(tokenEditor)));
+  comprobar('Versículo vacío → 400', r.status === 400, `status ${r.status}`);
+
+  r = await pedir('/api/contenido/versiculo_texto', json('PUT', {}, conToken(tokenEditor)));
+  comprobar('Sin el campo "valor" → 400', r.status === 400, `status ${r.status}`);
+
+  r = await pedir('/api/contenido/versiculo_referencia',
+    json('PUT', { valor: 'x'.repeat(61) }, conToken(tokenEditor)));
+  comprobar('Referencia más larga que su tope → 400', r.status === 400, `status ${r.status}`);
+
+  /* ══════════════════════════════════════════════ */
   seccion('Límite de intentos de login');
 
   let golpe429 = 0;

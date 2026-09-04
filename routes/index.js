@@ -4,6 +4,7 @@ const usuarioRoutes = require('./usuarioRoutes');
 const documentoRoutes = require('./documentoRoutes');
 const actividadRoutes = require('./actividadRoutes');
 const avisoRoutes = require('./avisoRoutes');
+const contenidoRoutes = require('./contenidoRoutes');
 const { CATEGORIAS } = require('../config/categorias');
 
 const router = express.Router();
@@ -45,6 +46,10 @@ router.get('/', (req, res) => {
         'POST   /api/avisos               (editor/admin)',
         'PUT    /api/avisos/:id           (editor/admin)',
         'DELETE /api/avisos/:id           (editor/admin)'
+      ],
+      contenido: [
+        'GET    /api/contenido',
+        'PUT    /api/contenido/:clave     (editor/admin)'
       ]
     }
   });
@@ -55,5 +60,6 @@ router.use('/usuarios', usuarioRoutes);
 router.use('/documentos', documentoRoutes);
 router.use('/actividades', actividadRoutes);
 router.use('/avisos', avisoRoutes);
+router.use('/contenido', contenidoRoutes);
 
 module.exports = router;

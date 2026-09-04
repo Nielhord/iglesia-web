@@ -152,8 +152,21 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
 
     const btn = doc.querySelector('.hero-btn');
     comprobar('El botón del hero ya no apunta a "#"', btn.getAttribute('href') !== '#', btn.getAttribute('href'));
+    comprobar('"Conócenos más" lleva a Quiénes somos',
+      btn.getAttribute('href') === '#quienes-somos', btn.getAttribute('href'));
     comprobar('El destino del botón existe en la página',
       !!doc.querySelector(btn.getAttribute('href')), btn.getAttribute('href'));
+
+    const nosotros = doc.getElementById('quienes-somos');
+    comprobar('La sección tiene su encabezado',
+      nosotros.querySelector('.nosotros-title')?.textContent.trim() === 'Quiénes somos');
+    const tarjetas = [...nosotros.querySelectorAll('.nosotros-card-title')].map(t => t.textContent.trim());
+    comprobar('Incluye misión y visión',
+      tarjetas.includes('Nuestra misión') && tarjetas.includes('Nuestra visión'),
+      tarjetas.join(' | '));
+    comprobar('La sección va antes de los templos',
+      !!(nosotros.compareDocumentPosition(doc.getElementById('templos-locales'))
+        & w.Node.DOCUMENT_POSITION_FOLLOWING));
 
     const flechas = doc.querySelectorAll('.temples-arrow');
     comprobar('Las flechas tienen type="button"', [...flechas].every(f => f.type === 'button'));
@@ -800,6 +813,79 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
         doc.querySelectorAll('.documento-card').length === 0);
       comprobar('Un anónimo tampoco ve botones de gestión',
         !doc.querySelector('.rama-btn-nuevo'));
+      dom.window.close();
+    }
+  }
+
+  /* ══════════════════════════════════════════════ */
+  seccion('Versículo editable de la portada (index.html)');
+  {
+    const Contenido = require('../models/Contenido');
+    const sesionEditor = await iniciarSesion('editor@iedp.cl');
+
+    {
+      // Una visita ve el versículo guardado y ni rastro del botón de editar.
+      await Contenido.findOneAndUpdate(
+        { clave: 'versiculo_texto' },
+        { $set: { valor: 'Lámpara es a mis pies tu palabra.' } },
+        { upsert: true }
+      );
+
+      const { doc, errs, dom } = await abrir('index.html', 1800);
+      comprobar('La portada carga sin errores', errs.length === 0, errs[0]);
+      comprobar('Muestra el versículo guardado, no el del HTML',
+        doc.querySelector('[data-contenido="versiculo_texto"]').textContent.trim()
+          === 'Lámpara es a mis pies tu palabra.',
+        doc.querySelector('[data-contenido="versiculo_texto"]').textContent.trim());
+      comprobar('Un anónimo NO ve el botón de editar',
+        doc.querySelector('[data-editar-versiculo]').hidden);
+      dom.window.close();
+    }
+
+    {
+      const { doc, dom } = await abrir('index.html', 1500, lector);
+      comprobar('Un miembro tampoco ve el botón de editar',
+        doc.querySelector('[data-editar-versiculo]').hidden);
+      dom.window.close();
+    }
+
+    {
+      const { w, doc, errs, dom } = await abrir('index.html', 1800, sesionEditor);
+      comprobar('La portada carga sin errores para el editor', errs.length === 0, errs[0]);
+
+      const boton = doc.querySelector('[data-editar-versiculo]');
+      comprobar('El editor SÍ ve el botón de editar', !boton.hidden);
+
+      boton.click();
+      const form = doc.querySelector('.hero-editor');
+      comprobar('El botón abre el formulario', !!form);
+      comprobar('Viene relleno con el versículo actual',
+        form.querySelector('textarea').value === 'Lámpara es a mis pies tu palabra.',
+        form.querySelector('textarea').value);
+
+      // Guardar vacío no debe llegar siquiera a la API.
+      form.querySelector('textarea').value = '   ';
+      form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+      await esperar(500);
+      comprobar('No deja guardar un versículo vacío',
+        /obligatorio/i.test(doc.querySelector('.hero-editor-aviso').textContent),
+        doc.querySelector('.hero-editor-aviso').textContent);
+
+      form.querySelector('textarea').value = 'Jehová es mi pastor;\nnada me faltará.';
+      form.querySelector('input').value = 'Salmos 23:1';
+      form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+      await esperar(1500);
+
+      const guardado = await Contenido.findOne({ clave: 'versiculo_texto' });
+      comprobar('El versículo nuevo llega a la base de datos',
+        guardado?.valor === 'Jehová es mi pastor;\nnada me faltará.', guardado?.valor);
+      comprobar('Guarda también la referencia',
+        (await Contenido.findOne({ clave: 'versiculo_referencia' }))?.valor === 'Salmos 23:1');
+      comprobar('Queda anotado quién lo cambió', !!guardado?.actualizadoPor);
+
+      comprobar('La portada se actualiza sin recargar',
+        /nada me faltará/.test(doc.querySelector('[data-contenido="versiculo_texto"]').textContent));
+      comprobar('El formulario se cierra al guardar', !doc.querySelector('.hero-editor'));
       dom.window.close();
     }
   }
