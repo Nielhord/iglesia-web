@@ -24,7 +24,9 @@ router.post(
   subir
 );
 
+// Editor y admin gestionan documentos por igual. Lo que separa a un admin es
+// el acceso a usuarios y aprobaciones, no a los archivos.
 router.put('/:id', validarToken, verificarRol(['editor', 'admin']), actualizar);
-router.delete('/:id', validarToken, verificarRol(['admin']), eliminar);
+router.delete('/:id', validarToken, verificarRol(['editor', 'admin']), eliminar);
 
 module.exports = router;

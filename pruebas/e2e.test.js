@@ -40,7 +40,9 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
   /* ---------- Datos de prueba ---------- */
   const autor = await User.create({
     nombre: 'Pastor Ruiz', email: 'pastor@iedp.cl',
-    password: await bcrypt.hash('valida123', 12), rol: 'editor'
+    password: await bcrypt.hash('valida123', 12), rol: 'editor',
+    // Sin esto quedaría 'pendiente' por defecto y no podría iniciar sesión.
+    estado: 'aprobado'
   });
   const semilla = [
     ['En nombre de Jesús', 'Coro', 'pdf', 'Acordes y letra'],
@@ -71,7 +73,10 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
   await new Promise(r => estatico.once('listening', r));
 
   /* ---------- Cargador de páginas en jsdom ---------- */
-  async function abrir(pagina, espera = 1600) {
+  // 'sesion' permite dejar el token en localStorage ANTES de que corran los
+  // scripts de la página: si se pusiera después, navbar.js y aprobaciones.js
+  // ya habrían decidido que no hay sesión.
+  async function abrir(pagina, espera = 1600, sesion = null) {
     const vc = new VirtualConsole();
     const errs = [];
     vc.on('jsdomError', e => errs.push(e.message));
@@ -80,7 +85,12 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
     const url = `http://localhost:5500/${pagina}`;
     const dom = await JSDOM.fromURL(url, {
       runScripts: 'dangerously', resources: 'usable',
-      pretendToBeVisual: true, virtualConsole: vc
+      pretendToBeVisual: true, virtualConsole: vc,
+      beforeParse(ventana) {
+        if (!sesion) return;
+        ventana.localStorage.setItem('iedp_token', sesion.token);
+        ventana.localStorage.setItem('iedp_usuario', JSON.stringify(sesion.usuario));
+      }
     });
     const w = dom.window;
     // jsdom no trae fetch: se inyecta el de Node resolviendo rutas relativas.
@@ -225,7 +235,27 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
     const creada = await User.findOne({ email: 'ana@iedp.cl' });
     comprobar('El registro crea el usuario en la base de datos', !!creada);
     comprobar('El usuario nuevo recibe el rol "miembro"', creada?.rol === 'miembro', creada?.rol);
-    comprobar('Guarda el token en localStorage', !!w.localStorage.getItem('iedp_token'));
+    comprobar('El usuario nuevo queda "pendiente"', creada?.estado === 'pendiente', creada?.estado);
+
+    // El registro ya no inicia sesión: la cuenta espera aprobación.
+    comprobar('NO guarda token en localStorage', !w.localStorage.getItem('iedp_token'));
+    comprobar('Avisa de que falta la aprobación',
+      /aprob/i.test(doc.getElementById('mensaje').textContent),
+      doc.getElementById('mensaje').textContent);
+    comprobar('Oculta el formulario tras enviarlo', doc.querySelector('form').hidden);
+    dom.window.close();
+  }
+  {
+    // Una cuenta pendiente no puede entrar por el formulario de login.
+    const { w, doc, dom } = await abrir('login.html');
+    doc.getElementById('email').value = 'ana@iedp.cl';
+    doc.getElementById('password').value = 'valida123';
+    doc.querySelector('form').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    await esperar(1500);
+    comprobar('Una cuenta pendiente no inicia sesión', !w.localStorage.getItem('iedp_token'));
+    comprobar('El login explica que está pendiente de aprobación',
+      /aprobaci/i.test(doc.getElementById('mensaje').textContent),
+      doc.getElementById('mensaje').textContent);
     dom.window.close();
   }
   {
@@ -241,6 +271,351 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
     dom.window.close();
   }
 
+  /* ══════════════════════════════════════════════ */
+  seccion('Aprobación de registros (aprobaciones.html)');
+  {
+    const hash = await bcrypt.hash('valida123', 12);
+    await User.create({
+      nombre: 'Admin Prueba', email: 'admin@iedp.cl',
+      password: hash, rol: 'admin', estado: 'aprobado'
+    });
+    await User.create({
+      nombre: 'Miembro Prueba', email: 'miembro@iedp.cl',
+      password: hash, rol: 'miembro', estado: 'aprobado'
+    });
+
+    const entrar = async (email) => {
+      const r = await fetch('http://localhost:3000/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password: 'valida123' })
+      });
+      const datos = await r.json();
+      return { token: datos.token, usuario: datos.usuario };
+    };
+
+    const sesionAdmin = await entrar('admin@iedp.cl');
+    const sesionMiembro = await entrar('miembro@iedp.cl');
+
+    // 'ana@iedp.cl' se registró más arriba desde el formulario y quedó pendiente.
+    {
+      const { doc, errs, dom } = await abrir('aprobaciones.html', 1800, sesionAdmin);
+      comprobar('aprobaciones.html carga sin errores', errs.length === 0, errs[0]);
+
+      const enlaceNavbar = doc.querySelector('[data-solo-admin]');
+      comprobar('La navbar muestra "Aprobaciones" a un admin',
+        enlaceNavbar && !enlaceNavbar.hidden, 'sigue oculto');
+
+      const globo = doc.querySelector('[data-badge-pendientes]');
+      comprobar('El contador de pendientes aparece con un número',
+        globo && !globo.hidden && /^\d+$/.test(globo.textContent), globo?.textContent);
+
+      const tarjetas = doc.querySelectorAll('.solicitud-card');
+      comprobar('Lista al menos una solicitud pendiente', tarjetas.length >= 1, `${tarjetas.length} tarjetas`);
+
+      const texto = doc.body.textContent;
+      comprobar('Muestra el nombre de quien solicita', /Ana Torres/.test(texto));
+      comprobar('Muestra su email', /ana@iedp\.cl/.test(texto));
+      comprobar('La marca de estado dice "En espera"', /En espera/.test(texto));
+
+      comprobar('Ofrece botón Aprobar', !!doc.querySelector('.btn-aprobar'));
+      comprobar('Ofrece botón Rechazar', !!doc.querySelector('.btn-rechazar'));
+      dom.window.close();
+    }
+
+    // Aprobar de verdad, pulsando el botón.
+    {
+      const { w, doc, dom } = await abrir('aprobaciones.html', 1800, sesionAdmin);
+      const tarjeta = [...doc.querySelectorAll('.solicitud-card')]
+        .find(t => /ana@iedp\.cl/.test(t.textContent));
+      comprobar('Encuentra la tarjeta de Ana', !!tarjeta);
+
+      tarjeta.querySelector('.btn-aprobar').dispatchEvent(new w.Event('click', { bubbles: true }));
+      await esperar(1400);
+
+      const ana = await User.findOne({ email: 'ana@iedp.cl' }).lean();
+      comprobar('Pulsar "Aprobar" cambia el estado en la base de datos',
+        ana?.estado === 'aprobado', ana?.estado);
+      comprobar('Guarda quién la aprobó', !!ana?.revisadoPor);
+      dom.window.close();
+    }
+
+    // Y ahora Ana sí puede entrar.
+    {
+      const r = await fetch('http://localhost:3000/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'ana@iedp.cl', password: 'valida123' })
+      });
+      comprobar('Tras la aprobación, Ana inicia sesión → 200', r.status === 200, `status ${r.status}`);
+    }
+
+    // Un miembro no debe poder usar la página.
+    {
+      const { doc, errs, dom } = await abrir('aprobaciones.html', 1500, sesionMiembro);
+      comprobar('Un miembro no ve errores de JS, ve un aviso', errs.length === 0, errs[0]);
+      comprobar('Le dice que la página es solo para administradores',
+        /solo para administradores/i.test(doc.body.textContent),
+        doc.body.textContent.slice(0, 120));
+      comprobar('No renderiza ninguna solicitud', doc.querySelectorAll('.solicitud-card').length === 0);
+
+      const enlaceNavbar = doc.querySelector('[data-solo-admin]');
+      comprobar('La navbar NO muestra "Aprobaciones" a un miembro',
+        !enlaceNavbar || enlaceNavbar.hidden, 'el enlace quedó visible');
+      dom.window.close();
+    }
+
+    // Sin sesión: redirige al login. jsdom no ejecuta navegaciones, así que
+    // se comprueba el intento (que registra como error) y su consecuencia.
+    {
+      const { w, doc, errs, dom } = await abrir('aprobaciones.html', 1200);
+      const intentoRedirigir = /login\.html/.test(w.location.href)
+        || errs.some(e => /navigation/i.test(e));
+      comprobar('Sin sesión intenta redirigir al login', intentoRedirigir,
+        `${w.location.href} | ${errs.join(' ')}`);
+      comprobar('Sin sesión no renderiza ninguna solicitud',
+        doc.querySelectorAll('.solicitud-card').length === 0);
+      dom.window.close();
+    }
+  }
+
+  /* ══════════════════════════════════════════════ */
+  seccion('Gestión de cuentas (usuarios.html)');
+  {
+    const hash = await bcrypt.hash('valida123', 12);
+    await User.create({
+      nombre: 'Rosa Díaz', email: 'rosa@iedp.cl',
+      password: hash, rol: 'miembro', estado: 'aprobado'
+    });
+
+    const entrar = async (email, password = 'valida123') => {
+      const r = await fetch('http://localhost:3000/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const datos = await r.json();
+      return { estado: r.status, token: datos.token, usuario: datos.usuario };
+    };
+
+    const sesionAdmin = await entrar('admin@iedp.cl');
+    const sesionMiembro = await entrar('miembro@iedp.cl');
+
+    {
+      const { doc, errs, dom } = await abrir('usuarios.html', 1800, sesionAdmin);
+      comprobar('usuarios.html carga sin errores', errs.length === 0, errs[0]);
+
+      const enlaces = [...doc.querySelectorAll('[data-solo-admin] a')].map(a => a.getAttribute('href'));
+      comprobar('La navbar muestra "Usuarios" a un admin',
+        enlaces.includes('usuarios.html'), enlaces.join(', '));
+
+      const tarjetas = [...doc.querySelectorAll('.solicitud-card')];
+      comprobar('Lista varias cuentas', tarjetas.length >= 3, `${tarjetas.length} tarjetas`);
+      comprobar('Muestra el rol de cada cuenta',
+        doc.querySelectorAll('.usuario-rol').length === tarjetas.length);
+      comprobar('Cada cuenta tiene selector de rol',
+        doc.querySelectorAll('.usuario-form select').length === tarjetas.length);
+      comprobar('Cada cuenta tiene campo de contraseña nueva',
+        doc.querySelectorAll('input[type="password"]').length === tarjetas.length);
+
+      // La propia cuenta del admin no debe poder cambiarse el rol ni borrarse.
+      const propia = tarjetas.find(t => /admin@iedp\.cl/.test(t.textContent));
+      comprobar('Encuentra la tarjeta del propio admin', !!propia);
+      comprobar('Su selector de rol está deshabilitado', propia.querySelector('select').disabled);
+      comprobar('No ofrece eliminarse a sí mismo', !propia.querySelector('.btn-rechazar'));
+      comprobar('Explica por qué', /No puedes cambiar tu propio rol/.test(propia.textContent));
+
+      const ajena = tarjetas.find(t => /rosa@iedp\.cl/.test(t.textContent));
+      comprobar('En una cuenta ajena sí se puede editar el rol', !ajena.querySelector('select').disabled);
+      comprobar('Y sí ofrece eliminarla', !!ajena.querySelector('.btn-rechazar'));
+      dom.window.close();
+    }
+
+    // Cambiar el rol de verdad.
+    {
+      const { w, doc, dom } = await abrir('usuarios.html', 1800, sesionAdmin);
+      const tarjeta = [...doc.querySelectorAll('.solicitud-card')]
+        .find(t => /rosa@iedp\.cl/.test(t.textContent));
+
+      tarjeta.querySelector('select').value = 'editor';
+      tarjeta.querySelector('form').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+      await esperar(1400);
+
+      const rosa = await User.findOne({ email: 'rosa@iedp.cl' }).lean();
+      comprobar('Guardar cambia el rol en la base de datos', rosa?.rol === 'editor', rosa?.rol);
+      comprobar('No alteró su estado', rosa?.estado === 'aprobado', rosa?.estado);
+      dom.window.close();
+    }
+
+    // Cambiar correo y contraseña a la vez.
+    {
+      const { w, doc, dom } = await abrir('usuarios.html', 1800, sesionAdmin);
+      const tarjeta = [...doc.querySelectorAll('.solicitud-card')]
+        .find(t => /rosa@iedp\.cl/.test(t.textContent));
+
+      // El cambio de contraseña pide confirmación; jsdom no la implementa.
+      w.confirm = () => true;
+
+      tarjeta.querySelector('input[type="email"]').value = 'rosa.diaz@iedp.cl';
+      tarjeta.querySelector('input[type="password"]').value = 'nuevaclave789';
+      tarjeta.querySelector('form').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+      await esperar(1500);
+
+      const rosa = await User.findOne({ email: 'rosa.diaz@iedp.cl' }).lean();
+      comprobar('Guarda el correo nuevo', !!rosa, 'no se encontró con el email nuevo');
+
+      const conNueva = await entrar('rosa.diaz@iedp.cl', 'nuevaclave789');
+      comprobar('Inicia sesión con la contraseña nueva → 200', conNueva.estado === 200, `status ${conNueva.estado}`);
+
+      const conVieja = await entrar('rosa.diaz@iedp.cl', 'valida123');
+      comprobar('La contraseña antigua deja de servir → 401', conVieja.estado === 401, `status ${conVieja.estado}`);
+      dom.window.close();
+    }
+
+    // Correo duplicado: mensaje claro, sin romper la página.
+    {
+      const { w, doc, dom } = await abrir('usuarios.html', 1800, sesionAdmin);
+      const tarjeta = [...doc.querySelectorAll('.solicitud-card')]
+        .find(t => /rosa\.diaz@iedp\.cl/.test(t.textContent));
+
+      tarjeta.querySelector('input[type="email"]').value = 'admin@iedp.cl';
+      tarjeta.querySelector('form').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+      await esperar(1200);
+
+      comprobar('Avisa de que el correo ya está en uso',
+        /ya lo usa otra cuenta/i.test(tarjeta.textContent), tarjeta.textContent.slice(-120));
+      dom.window.close();
+    }
+
+    // Un miembro no debe poder usar la página.
+    {
+      const { doc, errs, dom } = await abrir('usuarios.html', 1500, sesionMiembro);
+      comprobar('Un miembro no ve errores de JS', errs.length === 0, errs[0]);
+      comprobar('Le dice que es solo para administradores',
+        /solo para administradores/i.test(doc.body.textContent));
+      comprobar('No renderiza ninguna cuenta', doc.querySelectorAll('.solicitud-card').length === 0);
+      dom.window.close();
+    }
+  }
+
+  /* ══════════════════════════════════════════════ */
+  seccion('Gestión de documentos (gestion-documentos.html)');
+  {
+    const hash = await bcrypt.hash('valida123', 12);
+    await User.create({
+      nombre: 'Editor Prueba', email: 'editor@iedp.cl',
+      password: hash, rol: 'editor', estado: 'aprobado'
+    });
+
+    const entrar = async (email) => {
+      const r = await fetch('http://localhost:3000/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password: 'valida123' })
+      });
+      const datos = await r.json();
+      return { token: datos.token, usuario: datos.usuario };
+    };
+
+    const sesionEditor = await entrar('editor@iedp.cl');
+    const sesionAdmin = await entrar('admin@iedp.cl');
+    const sesionMiembro = await entrar('miembro@iedp.cl');
+
+    const enlacesVisibles = (doc) =>
+      [...doc.querySelectorAll('.navbar-nav li:not([hidden]) a')].map(a => a.getAttribute('href'));
+
+    // Un editor gestiona documentos, pero no usuarios ni aprobaciones.
+    {
+      const { doc, errs, dom } = await abrir('gestion-documentos.html', 1800, sesionEditor);
+      comprobar('gestion-documentos.html carga sin errores', errs.length === 0, errs[0]);
+
+      const enlaces = enlacesVisibles(doc);
+      comprobar('El editor ve "Gestionar"', enlaces.includes('gestion-documentos.html'), enlaces.join(', '));
+      comprobar('El editor NO ve "Usuarios"', !enlaces.includes('usuarios.html'), enlaces.join(', '));
+      comprobar('El editor NO ve "Aprobaciones"', !enlaces.includes('aprobaciones.html'), enlaces.join(', '));
+
+      comprobar('Muestra el formulario de subida', !!doc.querySelector('.subida-form'));
+      comprobar('El formulario pide un archivo', !!doc.querySelector('input[type="file"]'));
+      comprobar('Ofrece las 6 categorías',
+        doc.querySelector('#subida-categoria')?.options.length === 6,
+        String(doc.querySelector('#subida-categoria')?.options.length));
+      comprobar('Restringe los tipos de archivo aceptados',
+        /\.pdf/.test(doc.querySelector('input[type="file"]').accept));
+      comprobar('No ofrece subir HTML ni SVG',
+        !/\.html|\.svg/.test(doc.querySelector('input[type="file"]').accept),
+        doc.querySelector('input[type="file"]').accept);
+
+      const tarjetas = doc.querySelectorAll('.solicitud-card');
+      comprobar('Lista los documentos existentes', tarjetas.length >= 3, `${tarjetas.length} tarjetas`);
+      comprobar('Cada uno con botón de eliminar',
+        doc.querySelectorAll('.btn-rechazar').length === tarjetas.length);
+      comprobar('Y con enlace de descarga',
+        doc.querySelectorAll('.documento-descargar').length === tarjetas.length);
+      dom.window.close();
+    }
+
+    // Un admin ve las tres secciones.
+    {
+      const { doc, dom } = await abrir('gestion-documentos.html', 1800, sesionAdmin);
+      const enlaces = enlacesVisibles(doc);
+      comprobar('El admin ve "Gestionar", "Usuarios" y "Aprobaciones"',
+        ['gestion-documentos.html', 'usuarios.html', 'aprobaciones.html']
+          .every(h => enlaces.includes(h)), enlaces.join(', '));
+      dom.window.close();
+    }
+
+    // Editar un documento de verdad.
+    {
+      const { w, doc, dom } = await abrir('gestion-documentos.html', 1800, sesionEditor);
+      const tarjeta = [...doc.querySelectorAll('.solicitud-card')]
+        .find(t => /En nombre de Jesús/.test(t.textContent));
+      comprobar('Encuentra el documento a editar', !!tarjeta);
+
+      tarjeta.querySelector('input[type="text"]').value = 'En nombre de Jesús (corregido)';
+      tarjeta.querySelector('select').value = 'General';
+      tarjeta.querySelector('form').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+      await esperar(1400);
+
+      const Documento = require('../models/Documento');
+      const editado = await Documento.findOne({ titulo: 'En nombre de Jesús (corregido)' }).lean();
+      comprobar('Guardar cambia el título en la base de datos', !!editado);
+      comprobar('Y también la categoría', editado?.categoria === 'General', editado?.categoria);
+      dom.window.close();
+    }
+
+    // Borrar con el almacenamiento caído: mensaje claro, sin perder el registro.
+    {
+      const { w, doc, dom } = await abrir('gestion-documentos.html', 1800, sesionEditor);
+      const tarjeta = [...doc.querySelectorAll('.solicitud-card')]
+        .find(t => /Himnario completo/.test(t.textContent));
+
+      w.confirm = () => true;
+      tarjeta.querySelector('.btn-rechazar').dispatchEvent(new w.Event('click', { bubbles: true }));
+      await esperar(1400);
+
+      comprobar('Avisa de que el almacenamiento no respondió',
+        /almacenamiento no respondió/i.test(tarjeta.textContent), tarjeta.textContent.slice(-140));
+
+      const Documento = require('../models/Documento');
+      const sigue = await Documento.findOne({ titulo: 'Himnario completo' }).lean();
+      comprobar('El documento no se pierde si falla el borrado del archivo', !!sigue);
+      dom.window.close();
+    }
+
+    // Un miembro no debe poder entrar.
+    {
+      const { doc, errs, dom } = await abrir('gestion-documentos.html', 1500, sesionMiembro);
+      comprobar('Un miembro no ve errores de JS', errs.length === 0, errs[0]);
+      comprobar('Le dice que es solo para editores y administradores',
+        /solo para editores y administradores/i.test(doc.body.textContent));
+      comprobar('No renderiza el formulario de subida', !doc.querySelector('.subida-form'));
+      comprobar('Su navbar no ofrece "Gestionar"',
+        !enlacesVisibles(doc).includes('gestion-documentos.html'));
+      dom.window.close();
+    }
+  }
+
+  /* ══════════════════════════════════════════════ */
   seccion('Backend caído: el frontend no debe romperse');
   {
     await new Promise(r => api.close(r));

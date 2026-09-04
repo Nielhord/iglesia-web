@@ -109,12 +109,15 @@ function seccion(t) { console.log(`\n\x1b[1m── ${t} ──\x1b[0m`); }
   /* Los usuarios de prueba se crean directamente: el rol no se puede
      autoasignar por la API, que es justo lo que se comprueba abajo. */
   const hash = await bcrypt.hash('valida123', 12);
-  const miembro = await User.create({ nombre: 'Miembro', email: 'miembro@x.cl', password: hash });
-  const editor  = await User.create({ nombre: 'Editor',  email: 'editor@x.cl',  password: hash, rol: 'editor' });
-  const admin   = await User.create({ nombre: 'Admin',   email: 'admin@x.cl',   password: hash, rol: 'admin' });
+  // estado: 'aprobado' explícito. El default del schema es 'pendiente', y sin
+  // esto ninguno de estos usuarios podría iniciar sesión.
+  const aprobado = { password: hash, estado: 'aprobado' };
+  const miembro = await User.create({ nombre: 'Miembro', email: 'miembro@x.cl', ...aprobado });
+  const editor  = await User.create({ nombre: 'Editor',  email: 'editor@x.cl',  ...aprobado, rol: 'editor' });
+  const admin   = await User.create({ nombre: 'Admin',   email: 'admin@x.cl',   ...aprobado, rol: 'admin' });
 
   seccion('Normalización de email');
-  await User.create({ nombre: 'Mayus', email: '  MAYUS@X.CL  ', password: hash });
+  await User.create({ nombre: 'Mayus', email: '  MAYUS@X.CL  ', ...aprobado });
   const guardado = await User.findOne({ email: 'mayus@x.cl' });
   comprobar('Email se guarda en minúsculas y sin espacios', !!guardado, 'no se encontró en minúsculas');
 
@@ -197,6 +200,160 @@ function seccion(t) { console.log(`\n\x1b[1m── ${t} ──\x1b[0m`); }
   comprobar('ObjectId mal formado → 400 (no 500)', r.status === 400, `status ${r.status}`);
 
   /* ══════════════════════════════════════════════ */
+  seccion('Aprobación de registros');
+
+  // El registro del bloque anterior (j@x.cl) quedó pendiente.
+  const reciennacido = await User.findOne({ email: 'j@x.cl' }).lean();
+  comprobar('Una cuenta recién registrada queda en "pendiente"',
+    reciennacido?.estado === 'pendiente', String(reciennacido?.estado));
+
+  r = await pedir('/api/auth/register', json('POST',
+    { nombre: 'Nuevo', email: 'nuevo@x.cl', password: 'valida123' }));
+  // La cuota de registro (5/hora) ya está agotada, así que este usuario se
+  // crea directamente para poder probar el ciclo completo.
+  const enEspera = await User.create({
+    nombre: 'En Espera', email: 'espera@x.cl', password: hash
+  });
+  comprobar('El default del schema es "pendiente"', enEspera.estado === 'pendiente', enEspera.estado);
+
+  r = await pedir('/api/auth/login', json('POST', { email: 'espera@x.cl', password: 'valida123' }));
+  comprobar('Login de cuenta pendiente → 403', r.status === 403, `status ${r.status}`);
+  comprobar('El 403 explica que falta aprobación', /aprobaci/i.test(r.body?.error || ''), r.body?.error);
+  comprobar('No entrega token a una cuenta pendiente', !r.body?.token);
+
+  r = await pedir('/api/auth/register', json('POST',
+    { nombre: 'X', email: 'x@x.cl', password: 'valida123', estado: 'aprobado', rol: 'admin' }));
+  const colado = await User.findOne({ email: 'x@x.cl' }).lean();
+  comprobar('El registro NO acepta estado ni rol desde el body',
+    !colado || (colado.estado === 'pendiente' && colado.rol === 'miembro'),
+    JSON.stringify({ estado: colado?.estado, rol: colado?.rol }));
+
+  r = await pedir('/api/usuarios?estado=pendiente', conToken(tokenAdmin));
+  comprobar('Admin puede filtrar por estado → 200', r.status === 200, `status ${r.status}`);
+  comprobar('Solo devuelve pendientes',
+    r.body.usuarios.every(u => u.estado === 'pendiente'),
+    JSON.stringify(r.body.usuarios.map(u => u.estado)));
+
+  r = await pedir('/api/usuarios?estado=inventado', conToken(tokenAdmin));
+  comprobar('Estado inválido en el filtro → 400', r.status === 400, `status ${r.status}`);
+
+  r = await pedir(`/api/usuarios/${enEspera._id}/aprobar`, { method: 'PUT', ...conToken(tokenMiembro) });
+  comprobar('Un miembro no puede aprobar → 403', r.status === 403, `status ${r.status}`);
+
+  r = await pedir(`/api/usuarios/${enEspera._id}/aprobar`, { method: 'PUT' });
+  comprobar('Aprobar sin token → 401', r.status === 401, `status ${r.status}`);
+
+  r = await pedir(`/api/usuarios/${enEspera._id}/aprobar`, { method: 'PUT', ...conToken(tokenAdmin) });
+  comprobar('Admin aprueba → 200', r.status === 200, `status ${r.status} ${r.body?.error}`);
+  comprobar('La respuesta refleja el estado nuevo', r.body?.usuario?.estado === 'aprobado', r.body?.usuario?.estado);
+
+  const trasAprobar = await User.findById(enEspera._id).lean();
+  comprobar('Queda registrado quién lo aprobó',
+    String(trasAprobar.revisadoPor) === String(admin._id), String(trasAprobar.revisadoPor));
+  comprobar('Queda registrada la fecha de revisión', !!trasAprobar.fechaRevision);
+
+  r = await pedir('/api/auth/login', json('POST', { email: 'espera@x.cl', password: 'valida123' }));
+  comprobar('Tras aprobar, la cuenta ya inicia sesión → 200', r.status === 200 && !!r.body.token, `status ${r.status}`);
+
+  r = await pedir(`/api/usuarios/${enEspera._id}/aprobar`, { method: 'PUT', ...conToken(tokenAdmin) });
+  comprobar('Aprobar dos veces → 409', r.status === 409, `status ${r.status}`);
+
+  r = await pedir(`/api/usuarios/${enEspera._id}/rechazar`, { method: 'PUT', ...conToken(tokenAdmin) });
+  comprobar('Admin rechaza → 200', r.status === 200, `status ${r.status}`);
+
+  r = await pedir('/api/auth/login', json('POST', { email: 'espera@x.cl', password: 'valida123' }));
+  comprobar('Una cuenta rechazada no puede entrar → 403', r.status === 403, `status ${r.status}`);
+  comprobar('El mensaje de rechazo es distinto al de pendiente',
+    /rechazada/i.test(r.body?.error || ''), r.body?.error);
+
+  r = await pedir(`/api/usuarios/${admin._id}/rechazar`, { method: 'PUT', ...conToken(tokenAdmin) });
+  comprobar('Un admin no puede rechazarse a sí mismo → 400', r.status === 400, `status ${r.status}`);
+
+  r = await pedir('/api/usuarios/000000000000000000000000/aprobar', { method: 'PUT', ...conToken(tokenAdmin) });
+  comprobar('Aprobar un id inexistente → 404', r.status === 404, `status ${r.status}`);
+
+  r = await pedir('/api/usuarios/no-es-objectid/aprobar', { method: 'PUT', ...conToken(tokenAdmin) });
+  comprobar('Aprobar con id mal formado → 400 (no 500)', r.status === 400, `status ${r.status}`);
+
+  // Las cuentas anteriores a esta función no tienen el campo 'estado'.
+  await User.collection.insertOne({
+    nombre: 'Antiguo', email: 'antiguo@x.cl', password: hash, rol: 'miembro', fechaRegistro: new Date()
+  });
+  r = await pedir('/api/auth/login', json('POST', { email: 'antiguo@x.cl', password: 'valida123' }));
+  comprobar('Una cuenta SIN campo estado sigue pudiendo entrar → 200',
+    r.status === 200 && !!r.body.token, `status ${r.status} ${r.body?.error}`);
+
+  const antiguo = await User.findOne({ email: 'antiguo@x.cl' }).lean();
+
+  // Regresión: findById + save() hidrataba el documento, Mongoose le aplicaba
+  // el default 'pendiente' y lo grababa. Cambiarle el nombre a una cuenta
+  // antigua bastaba para dejarla sin poder entrar.
+  r = await pedir(`/api/usuarios/${antiguo._id}`, json('PUT', { nombre: 'Antiguo Renombrado' },
+    { headers: { Authorization: `Bearer ${tokenAdmin}` } }));
+  comprobar('Editar una cuenta antigua → 200', r.status === 200, `status ${r.status} ${r.body?.error}`);
+
+  const trasEditar = await User.collection.findOne({ email: 'antiguo@x.cl' });
+  comprobar('Editarla NO le inventa un estado en la base',
+    trasEditar.estado === undefined, JSON.stringify(trasEditar.estado));
+  comprobar('El nombre sí se guardó', trasEditar.nombre === 'Antiguo Renombrado', trasEditar.nombre);
+
+  r = await pedir('/api/auth/login', json('POST', { email: 'antiguo@x.cl', password: 'valida123' }));
+  comprobar('Y sigue pudiendo iniciar sesión tras la edición → 200',
+    r.status === 200, `status ${r.status} ${r.body?.error}`);
+
+  /* ══════════════════════════════════════════════ */
+  seccion('Gestión de usuarios (admin)');
+
+  const gestionado = await User.create({
+    nombre: 'Para Editar', email: 'editar@x.cl', password: hash, estado: 'aprobado'
+  });
+  const putAdmin = (cuerpo) => json('PUT', cuerpo, { headers: { Authorization: `Bearer ${tokenAdmin}` } });
+
+  r = await pedir(`/api/usuarios/${gestionado._id}`, putAdmin({ rol: 'editor' }));
+  comprobar('Cambiar el rol → 200', r.status === 200, `status ${r.status} ${r.body?.error}`);
+  comprobar('La respuesta trae el rol nuevo', r.body?.usuario?.rol === 'editor', r.body?.usuario?.rol);
+
+  r = await pedir(`/api/usuarios/${gestionado._id}`, putAdmin({ rol: 'jefe-supremo' }));
+  comprobar('Un rol inexistente → 400', r.status === 400, `status ${r.status}`);
+
+  r = await pedir(`/api/usuarios/${gestionado._id}`, putAdmin({ email: 'admin@x.cl' }));
+  comprobar('Email ya usado por otro → 409', r.status === 409, `status ${r.status}`);
+
+  r = await pedir(`/api/usuarios/${gestionado._id}`, putAdmin({ email: 'no-es-un-email' }));
+  comprobar('Email con formato inválido → 400', r.status === 400, `status ${r.status}`);
+
+  r = await pedir(`/api/usuarios/${gestionado._id}`, putAdmin({}));
+  comprobar('Cuerpo sin campos editables → 400', r.status === 400, `status ${r.status}`);
+
+  r = await pedir(`/api/usuarios/${gestionado._id}`, putAdmin({ password: 'corta' }));
+  comprobar('Contraseña nueva demasiado corta → 400', r.status === 400, `status ${r.status}`);
+
+  r = await pedir(`/api/usuarios/${gestionado._id}`,
+    putAdmin({ email: '  NUEVO@X.CL  ', password: 'otraclave456' }));
+  comprobar('Cambiar email y contraseña a la vez → 200', r.status === 200, `status ${r.status} ${r.body?.error}`);
+  comprobar('El email se normaliza a minúsculas',
+    r.body?.usuario?.email === 'nuevo@x.cl', r.body?.usuario?.email);
+  comprobar('La respuesta no filtra el hash', !r.texto.includes('$2b$'));
+
+  r = await pedir('/api/auth/login', json('POST', { email: 'nuevo@x.cl', password: 'otraclave456' }));
+  comprobar('Se inicia sesión con el email y la contraseña nuevos → 200',
+    r.status === 200, `status ${r.status} ${r.body?.error}`);
+
+  r = await pedir('/api/auth/login', json('POST', { email: 'nuevo@x.cl', password: 'valida123' }));
+  comprobar('La contraseña antigua ya no sirve → 401', r.status === 401, `status ${r.status}`);
+
+  const trasCambios = await User.findById(gestionado._id).lean();
+  comprobar('El cambio de contraseña no alteró el rol', trasCambios.rol === 'editor', trasCambios.rol);
+  comprobar('Ni el estado', trasCambios.estado === 'aprobado', trasCambios.estado);
+
+  r = await pedir(`/api/usuarios/${gestionado._id}`, putAdmin({ estado: 'aprobado', revisadoPor: String(admin._id) }));
+  comprobar('"estado" no es editable por PUT → 400', r.status === 400, `status ${r.status}`);
+
+  r = await pedir(`/api/usuarios/${gestionado._id}`, json('PUT', { rol: 'admin' },
+    { headers: { Authorization: `Bearer ${tokenEditor}` } }));
+  comprobar('Un editor no puede cambiar roles → 403', r.status === 403, `status ${r.status}`);
+
+  /* ══════════════════════════════════════════════ */
   seccion('Escalada de privilegios');
 
   const usr = await User.findOne({ email: 'j@x.cl' });
@@ -249,6 +406,65 @@ function seccion(t) { console.log(`\n\x1b[1m── ${t} ──\x1b[0m`); }
   comprobar('PDF válido pero Supabase caído → 502 (no 500 ni cuelgue)', r.status === 502, `status ${r.status} ${r.body?.error}`);
   const docsTrasFallo = await Documento.countDocuments();
   comprobar('No queda registro en Mongo si falla el almacenamiento', docsTrasFallo === 0, `hay ${docsTrasFallo}`);
+
+  /* ══════════════════════════════════════════════ */
+  seccion('Documentos: quién puede editar y borrar');
+
+  // Se inserta directamente porque la subida por API no puede completarse:
+  // el almacenamiento apunta a un puerto muerto a propósito.
+  const semilla = () => Documento.create({
+    titulo: 'Partitura de prueba',
+    categoria: 'Coro',
+    tipoArchivo: 'pdf',
+    nombreOriginal: 'prueba.pdf',
+    tamanoBytes: 1234,
+    archivoURL: 'http://127.0.0.1:9/archivo.pdf',
+    publicId: 'uploads/prueba.pdf',
+    subidoPor: admin._id
+  });
+
+  let doc = await semilla();
+
+  r = await pedir(`/api/documentos/${doc._id}`, json('PUT', { titulo: 'Cambiado' }));
+  comprobar('Editar sin token → 401', r.status === 401, `status ${r.status}`);
+
+  r = await pedir(`/api/documentos/${doc._id}`, json('PUT', { titulo: 'Cambiado' },
+    { headers: { Authorization: `Bearer ${tokenMiembro}` } }));
+  comprobar('Un miembro no puede editar → 403', r.status === 403, `status ${r.status}`);
+
+  r = await pedir(`/api/documentos/${doc._id}`, json('PUT', { titulo: 'Editado por editor' },
+    { headers: { Authorization: `Bearer ${tokenEditor}` } }));
+  comprobar('Un editor SÍ puede editar → 200', r.status === 200, `status ${r.status} ${r.body?.error}`);
+  comprobar('El título quedó guardado',
+    r.body?.documento?.titulo === 'Editado por editor', r.body?.documento?.titulo);
+
+  r = await pedir(`/api/documentos/${doc._id}`, json('PUT', { categoria: 'NoExiste' },
+    { headers: { Authorization: `Bearer ${tokenEditor}` } }));
+  comprobar('Categoría inválida al editar → 400', r.status === 400, `status ${r.status}`);
+
+  r = await pedir(`/api/documentos/${doc._id}`, { method: 'DELETE', ...conToken(tokenMiembro) });
+  comprobar('Un miembro no puede borrar → 403', r.status === 403, `status ${r.status}`);
+
+  const sigueAhi = await Documento.findById(doc._id);
+  comprobar('Tras el 403 el documento sigue existiendo', !!sigueAhi);
+
+  // Antes esto devolvía 403: borrar era exclusivo de admin. Ahora el editor
+  // pasa el control de rol y llega hasta el almacenamiento, que está caído.
+  r = await pedir(`/api/documentos/${doc._id}`, { method: 'DELETE', ...conToken(tokenEditor) });
+  comprobar('Un editor SÍ puede borrar (llega al almacenamiento) → 502',
+    r.status === 502, `status ${r.status} ${r.body?.error}`);
+
+  r = await pedir(`/api/documentos/${doc._id}`, { method: 'DELETE', ...conToken(tokenAdmin) });
+  comprobar('Un admin también puede borrar → 502', r.status === 502, `status ${r.status}`);
+
+  const trasFalloBorrado = await Documento.findById(doc._id);
+  comprobar('Si el almacenamiento falla, el documento NO se borra de Mongo', !!trasFalloBorrado);
+
+  r = await pedir('/api/documentos/000000000000000000000000',
+    { method: 'DELETE', ...conToken(tokenEditor) });
+  comprobar('Borrar un id inexistente → 404', r.status === 404, `status ${r.status}`);
+
+  await Documento.deleteMany({});
 
   /* ══════════════════════════════════════════════ */
   seccion('Límite de intentos de login');

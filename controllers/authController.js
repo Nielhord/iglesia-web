@@ -42,7 +42,11 @@ function datosPublicos(usuario) {
     id: usuario._id,
     nombre: usuario.nombre,
     email: usuario.email,
-    rol: usuario.rol
+    rol: usuario.rol,
+    // Las cuentas anteriores a la aprobación no tienen el campo; se muestran
+    // como aprobadas, que es como las trata el login.
+    estado: usuario.estado || 'aprobado',
+    fechaRegistro: usuario.fechaRegistro
   };
 }
 
@@ -69,14 +73,16 @@ async function registrar(req, res) {
     nombre,
     email: emailNormalizado,
     password: await bcrypt.hash(password, RONDAS_BCRYPT)
-    // El rol NO se lee del body: siempre queda en el default 'miembro'.
-    // Solo un admin puede cambiarlo después desde PUT /api/usuarios/:id.
+    // Ni el rol ni el estado se leen del body: quedan en sus valores por
+    // defecto ('miembro' y 'pendiente'). Solo un admin puede cambiarlos.
   });
 
+  // Deliberadamente NO se devuelve token: la cuenta todavía no puede entrar.
+  // Devolverlo daría acceso inmediato y anularía la aprobación.
   res.status(201).json({
-    mensaje: 'Usuario registrado con éxito',
-    usuario: datosPublicos(usuario),
-    token: firmarToken(usuario)
+    mensaje: 'Solicitud enviada. Un administrador debe aprobar tu cuenta antes '
+      + 'de que puedas iniciar sesión.',
+    usuario: datosPublicos(usuario)
   });
 }
 
@@ -88,10 +94,17 @@ async function login(req, res) {
     return res.status(400).json({ error: 'Email y contraseña son obligatorios' });
   }
 
-  // El modelo tiene select:false en password, hay que pedirlo explícitamente.
+  // select('+password') porque el modelo lo oculta por defecto.
+  //
+  // .lean() no es una optimización: es necesario. Mongoose aplica los valores
+  // por defecto del schema también al hidratar un documento, así que una
+  // cuenta anterior a la aprobación (sin el campo 'estado' en la base) se
+  // leería como 'pendiente' y quedaría bloqueada. lean() devuelve el
+  // documento tal cual está guardado.
   const usuario = await User
     .findOne({ email: String(email).toLowerCase().trim() })
-    .select('+password');
+    .select('+password')
+    .lean();
 
   if (!usuario) {
     await bcrypt.compare(password, HASH_SENUELO);
@@ -103,6 +116,18 @@ async function login(req, res) {
     return res.status(401).json({ error: CREDENCIALES_INVALIDAS });
   }
 
+  // La comprobación de estado va DESPUÉS de validar la contraseña. Así el
+  // mensaje "pendiente de aprobación" solo lo ve quien ya demostró ser dueño
+  // de la cuenta, y no sirve para averiguar qué emails están registrados.
+  if (!User.estaAprobado(usuario)) {
+    return res.status(403).json({
+      error: usuario.estado === 'rechazado'
+        ? 'Tu solicitud de registro fue rechazada. Contacta con la administración de la iglesia.'
+        : 'Tu cuenta está pendiente de aprobación. Un administrador debe autorizarla.',
+      estado: usuario.estado
+    });
+  }
+
   res.json({
     mensaje: 'Login exitoso',
     usuario: datosPublicos(usuario),
@@ -112,7 +137,9 @@ async function login(req, res) {
 
 // GET /api/auth/perfil  (requiere token)
 async function perfil(req, res) {
-  const usuario = await User.findById(req.usuario.userId);
+  // .lean() por el mismo motivo que en login: no inventar un 'estado' que
+  // la cuenta no tiene guardado.
+  const usuario = await User.findById(req.usuario.userId).lean();
 
   if (!usuario) {
     return res.status(404).json({ error: 'Usuario no encontrado' });

@@ -41,8 +41,29 @@ const userSchema = new mongoose.Schema({
     default: 'miembro'
   },
 
+  // Aprobación de registros: una cuenta nueva no puede iniciar sesión hasta
+  // que un admin la apruebe.
+  //
+  // Los usuarios creados antes de esta función no tienen el campo. Se tratan
+  // como aprobados (ver estaAprobado más abajo) para no dejar a nadie fuera.
+  estado: {
+    type: String,
+    enum: {
+      values: ['pendiente', 'aprobado', 'rechazado'],
+      message: 'El estado debe ser pendiente, aprobado o rechazado'
+    },
+    default: 'pendiente'
+  },
+
+  // Rastro de quién resolvió la solicitud y cuándo.
+  revisadoPor: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  fechaRevision: { type: Date, default: null },
+
   fechaRegistro: { type: Date, default: Date.now }
 });
+
+// Buscar las solicitudes pendientes es la consulta de la página de aprobación.
+userSchema.index({ estado: 1, fechaRegistro: -1 });
 
 // Oculta password y __v en cualquier res.json(usuario).
 userSchema.set('toJSON', {
@@ -53,5 +74,15 @@ userSchema.set('toJSON', {
   }
 });
 
+/* Un usuario puede entrar si está aprobado explícitamente, o si es anterior
+   a esta función y por tanto no tiene el campo. Cualquier otro valor
+   ('pendiente', 'rechazado') bloquea el acceso. */
+function estaAprobado(usuario) {
+  return usuario.estado === undefined
+    || usuario.estado === null
+    || usuario.estado === 'aprobado';
+}
+
 module.exports = mongoose.model('User', userSchema);
 module.exports.FORMATO_EMAIL = FORMATO_EMAIL;
+module.exports.estaAprobado = estaAprobado;

@@ -18,9 +18,11 @@ router.get('/', (req, res) => {
         'GET  /api/auth/perfil            (token)'
       ],
       usuarios: [
-        'GET    /api/usuarios             (admin)',
-        'PUT    /api/usuarios/:id         (admin)',
-        'DELETE /api/usuarios/:id         (admin)'
+        'GET    /api/usuarios?estado=pendiente   (admin)',
+        'PUT    /api/usuarios/:id                (admin)',
+        'PUT    /api/usuarios/:id/aprobar        (admin)',
+        'PUT    /api/usuarios/:id/rechazar       (admin)',
+        'DELETE /api/usuarios/:id                (admin)'
       ],
       documentos: [
         'GET    /api/documentos?categoria=Coro&pagina=1&limite=20',
@@ -28,7 +30,7 @@ router.get('/', (req, res) => {
         'GET    /api/documentos/:id/descargar',
         'POST   /api/documentos           (editor/admin, multipart: file)',
         'PUT    /api/documentos/:id       (editor/admin)',
-        'DELETE /api/documentos/:id       (admin)'
+        'DELETE /api/documentos/:id       (editor/admin)'
       ]
     }
   });

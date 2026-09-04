@@ -11,7 +11,8 @@
     "dev": "nodemon server.js",
     "test": "node pruebas/api.test.js && node pruebas/e2e.test.js",
     "test:deps": "npm install --no-save mongodb-memory-server jsdom",
-    "mantener-activo": "node scripts/mantener-activo.js"
+    "mantener-activo": "node scripts/mantener-activo.js",
+    "migrar-estados": "node scripts/migrar-estados.js"
   },
   "keywords": [
     "iglesia",
