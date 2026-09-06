@@ -183,6 +183,44 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
     const externos = [...doc.querySelectorAll('a[target="_blank"]')];
     comprobar('Todos los enlaces externos llevan rel="noopener"',
       externos.every(a => (a.getAttribute('rel') || '').includes('noopener')), `${externos.length} enlaces`);
+
+    /* --- Pie de página --- */
+    const pie = doc.querySelector('footer.pie');
+    comprobar('La portada tiene pie de página', !!pie);
+    comprobar('El pie va después del contenido principal',
+      !!(doc.querySelector('main').compareDocumentPosition(pie)
+        & w.Node.DOCUMENT_POSITION_FOLLOWING));
+
+    comprobar('El teléfono es pulsable desde el móvil',
+      !!pie.querySelector('a[href^="tel:"]'), 'sin enlace tel:');
+    comprobar('El correo abre el cliente de mail',
+      !!pie.querySelector('a[href^="mailto:"]'), 'sin enlace mailto:');
+    comprobar('Incluye la dirección del templo',
+      /C\. 14 Sur 1551, Talca/.test(pie.textContent));
+    comprobar('La dirección va dentro de un <address>',
+      !!pie.querySelector('address'));
+
+    // Día y hora son dos <span> pegados: se leen por separado, no del li.
+    const horarios = [...pie.querySelectorAll('.pie-horarios li')]
+      .map(li => [...li.querySelectorAll('span')].map(e => e.textContent.trim()).join(' '));
+    comprobar('Publica los tres horarios de reunión', horarios.length === 3, horarios.join(' | '));
+    comprobar('Y coinciden con los que calcula la portada',
+      horarios.join(' | ') === 'Martes 20:00 | Jueves 20:00 | Domingo 18:00',
+      horarios.join(' | '));
+
+    comprobar('Enlaza las cinco ramas desde el pie',
+      ['varones', 'dorcas', 'coro', 'jovenes', 'escuela']
+        .every(r => !!pie.querySelector(`a[href="${r}.html"]`)));
+
+    comprobar('El año del copyright se pone solo',
+      pie.querySelector('[data-anio-actual]').textContent === String(new Date().getFullYear()),
+      pie.querySelector('[data-anio-actual]').textContent);
+
+    const redes = [...pie.querySelectorAll('.pie-red')];
+    comprobar('Ofrece enlaces a redes y radio', redes.length >= 3, `${redes.length}`);
+    comprobar('Todas las redes se abren en otra pestaña con rel seguro',
+      redes.every(a => a.getAttribute('target') === '_blank'
+        && (a.getAttribute('rel') || '').includes('noopener')));
     dom.window.close();
   }
 
