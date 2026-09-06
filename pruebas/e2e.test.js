@@ -938,6 +938,49 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
   }
 
   /* ══════════════════════════════════════════════ */
+  seccion('Pie compartido, 404 e íconos');
+  {
+    // El pie dejó de estar copiado en cada archivo: ahora es un componente.
+    const { doc, errs, dom } = await abrir('coro.html', 1500);
+    comprobar('El pie también aparece fuera de la portada',
+      !!doc.querySelector('footer.pie'), errs[0]);
+    comprobar('Trae el correo y el teléfono',
+      !!doc.querySelector('footer.pie a[href^="mailto:"]')
+        && !!doc.querySelector('footer.pie a[href^="tel:"]'));
+    comprobar('El año se rellena también aquí',
+      doc.querySelector('[data-anio-actual]')?.textContent === String(new Date().getFullYear()));
+    // Los anclajes de la portada no existen en una rama: deben ir cualificados.
+    comprobar('Los enlaces a secciones de la portada llevan index.html delante',
+      !!doc.querySelector('footer.pie a[href="index.html#quienes-somos"]'),
+      [...doc.querySelectorAll('footer.pie a')].map(a => a.getAttribute('href')).join(' '));
+    dom.window.close();
+  }
+  {
+    const { doc, errs, dom } = await abrir('404.html', 1500);
+    comprobar('404.html carga sin errores', errs.length === 0, errs[0]);
+    comprobar('Explica qué pasó', /no existe/i.test(doc.querySelector('.error-titulo').textContent));
+    comprobar('Ofrece volver a la portada', !!doc.querySelector('a[href="index.html"]'));
+    comprobar('No la indexan los buscadores',
+      /noindex/.test(doc.querySelector('meta[name="robots"]')?.content || ''));
+    comprobar('Conserva navbar y pie para poder navegar',
+      !!doc.querySelector('#navbar .custom-navbar') && !!doc.querySelector('footer.pie'));
+    dom.window.close();
+  }
+  {
+    const { doc, dom } = await abrir('index.html', 1200);
+    comprobar('Declara ícono para la pantalla de inicio de iOS',
+      !!doc.querySelector('link[rel="apple-touch-icon"]'));
+    comprobar('Tiene manifest y color de tema',
+      !!doc.querySelector('link[rel="manifest"]')
+        && !!doc.querySelector('meta[name="theme-color"]'));
+    // El fondo pesado se sirve en WebP; el PNG queda de respaldo.
+    comprobar('La foto del mapa ofrece WebP con respaldo PNG',
+      doc.querySelector('picture source[type="image/webp"]')?.getAttribute('srcset')
+        === 'imagenes/ubicacion.webp');
+    dom.window.close();
+  }
+
+  /* ══════════════════════════════════════════════ */
   seccion('Backend caído: el frontend no debe romperse');
   {
     await new Promise(r => api.close(r));

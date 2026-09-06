@@ -226,6 +226,56 @@ curl -X POST http://localhost:3000/api/documentos \
   -F "categoria=Coro"
 ```
 
+## Despliegue
+
+El backend necesita un servicio que ejecute Node (Render, Railway, Fly). El
+frontend es HTML estático: sirve cualquier hosting, incluido Netlify o Cloudflare
+Pages. Van en sitios distintos y se hablan por HTTPS.
+
+**1. Backend.** Repositorio conectado, raíz `iglesia-web-backend`, build
+`npm ci`, arranque `npm start`. El puerto lo pone el proveedor: `config/env.js`
+ya lee `process.env.PORT`.
+
+**2. Variables de entorno** en el panel del proveedor (nunca en el repositorio):
+
+```
+NODE_ENV=production
+MONGO_URI=...            # la misma cadena que en local
+JWT_SECRET=...           # 64 caracteres, distinto al de desarrollo
+BASE_URL=https://api.tudominio.cl
+CORS_ORIGIN=https://tudominio.cl,https://www.tudominio.cl
+SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...
+SUPABASE_BUCKET=archivos
+MAX_FILE_SIZE_MB=10
+```
+
+`CORS_ORIGIN` es la parte que más se equivoca: van los orígenes del **frontend**,
+con `https://` y sin barra final. Si no coincide, el navegador bloquea todas las
+peticiones y la página parece caída sin dar error visible.
+
+**3. MongoDB Atlas** → *Network Access*: la IP de salida del proveedor, o
+`0.0.0.0/0` si es dinámica.
+
+**4. Frontend.** Subir `iglesia-web-frontend` tal cual y, en `js/config.js`,
+cambiar `PRODUCCION` por la URL real del backend. El archivo elige sola la API
+según el dominio, así que no hay que tocar nada más al alternar local/producción;
+si se olvida, la consola avisa con un error explícito.
+
+**5. Rutas del hosting estático**: que `404.html` se sirva como página de error.
+En Netlify basta con que el archivo exista.
+
+**6. Comprobar**, en este orden: `GET /health` responde, la portada carga, el
+login funciona, y un documento se sube y se descarga.
+
+### Antes de publicar
+
+- [ ] `og:image` con URL absoluta en las 7 páginas (hoy es relativa: no sale
+      imagen al compartir por WhatsApp)
+- [ ] Teléfono, correo y redes reales en `components/footer.html`
+- [ ] `robots.txt` y `sitemap.xml` con el dominio definitivo
+- [ ] Copias de seguridad de Mongo: el plan M0 no hace ninguna
+
 ## Notas de seguridad
 
 - El `.env` está en `.gitignore`. **Nunca** lo subas al repositorio.
