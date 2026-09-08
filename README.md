@@ -232,9 +232,14 @@ El backend necesita un servicio que ejecute Node (Render, Railway, Fly). El
 frontend es HTML estático: sirve cualquier hosting, incluido Netlify o Cloudflare
 Pages. Van en sitios distintos y se hablan por HTTPS.
 
-**1. Backend.** Repositorio conectado, raíz `iglesia-web-backend`, build
-`npm ci`, arranque `npm start`. El puerto lo pone el proveedor: `config/env.js`
-ya lee `process.env.PORT`.
+**1. Backend.** En Render: *New > Blueprint* y apuntar a este repositorio.
+`render.yaml` ya trae el build, el arranque, el health check y la lista de
+variables; solo hay que rellenar sus valores en el panel. El puerto lo pone el
+proveedor: `config/env.js` ya lee `process.env.PORT`.
+
+El plan `free` del blueprint **duerme el servidor tras ~15 minutos sin visitas**
+y la siguiente tarda entre 30 y 60 segundos en responder. Para uso real hay que
+subir de plan; para enseñar el sitio, basta con abrirlo unos minutos antes.
 
 **2. Variables de entorno** en el panel del proveedor (nunca en el repositorio):
 
