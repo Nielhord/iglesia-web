@@ -1,0 +1,33 @@
+# Blueprint de Render: con este archivo, crear el servicio es "New > Blueprint"
+# y apuntar al repositorio, en vez de rellenar el formulario a mano.
+#
+# Las claves van marcadas con sync:false a propósito: Render las pide en su
+# panel y NO quedan escritas en el repositorio.
+services:
+  - type: web
+    name: iglesia-web-api
+    runtime: node
+    plan: free          # gratis, pero el servidor se duerme tras ~15 min sin visitas
+    region: oregon      # cámbiala por la misma región de tu cluster de MongoDB Atlas
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUPABASE_BUCKET
+        value: archivos
+      - key: MAX_FILE_SIZE_MB
+        value: "10"
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: BASE_URL
+        sync: false     # la URL que Render te asigne, por ejemplo https://iglesia-web-api.onrender.com
+      - key: CORS_ORIGIN
+        sync: false     # el origen del FRONTEND, sin barra final
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
