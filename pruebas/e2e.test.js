@@ -216,8 +216,13 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
       pie.querySelector('[data-anio-actual]').textContent === String(new Date().getFullYear()),
       pie.querySelector('[data-anio-actual]').textContent);
 
+    // Las redes de relleno se quitaron al no haber cuentas reales; queda la
+    // radio. Lo que importa es que lo que haya sea seguro, no cuántos son.
     const redes = [...pie.querySelectorAll('.pie-red')];
-    comprobar('Ofrece enlaces a redes y radio', redes.length >= 3, `${redes.length}`);
+    comprobar('Ofrece al menos un enlace externo', redes.length >= 1, `${redes.length}`);
+    comprobar('Ningún enlace del pie quedó apuntando a una portada genérica',
+      !redes.some(a => /^https:\/\/(www\.)?(facebook|instagram|youtube)\.com\/?$/.test(a.href)),
+      redes.map(a => a.href).join(' '));
     comprobar('Todas las redes se abren en otra pestaña con rel seguro',
       redes.every(a => a.getAttribute('target') === '_blank'
         && (a.getAttribute('rel') || '').includes('noopener')));
