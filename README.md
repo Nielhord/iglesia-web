@@ -295,6 +295,33 @@ login funciona, y un documento se sube y se descarga.
 
 ## Pendiente
 
-- Tests (no hay ninguno todavía)
-- Recuperación de contraseña por correo
-- Refresh tokens
+Ordenado por lo que más se nota si falta.
+
+**Antes de dar el sitio por terminado**
+
+- Teléfono, correo y redes reales en `components/footer.html` del frontend
+  (hoy son datos de relleno)
+- Revisar el texto de "Quiénes somos" de la portada
+
+**Cuando haya hosting**
+
+- Desplegar el backend (`render.yaml` ya lo deja casi hecho)
+- Poner esa URL en `PRODUCCION` de `js/config.js`
+- `CORS_ORIGIN` con el origen real del frontend
+- Apuntar el dominio
+
+**Mejoras que se pueden añadir con el sitio ya en marcha**
+
+- Recuperación de contraseña por correo. Hoy solo un admin puede cambiarla
+  desde `usuarios.html`.
+- Avisar por correo a quien fue aprobado. Hoy tiene que ir probando a entrar.
+- Copias de seguridad de Mongo: el plan M0 de Atlas no hace ninguna.
+- Refresh tokens (el token dura 2 h y luego hay que volver a entrar).
+
+**Hueco conocido en las pruebas**
+
+Hay 377 comprobaciones automáticas (`npm test`), pero ninguna ejercita una
+subida que termine *bien*: las pruebas apuntan el almacenamiento a un puerto
+muerto para no tocar el bucket real, así que cubren los errores (tipo no
+permitido, archivo grande, almacenamiento caído) y no el camino feliz. Esa
+parte se comprueba a mano subiendo un archivo.
