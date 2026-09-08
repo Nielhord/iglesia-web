@@ -953,7 +953,28 @@ const TIPOS = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript',
     comprobar('Los enlaces a secciones de la portada llevan index.html delante',
       !!doc.querySelector('footer.pie a[href="index.html#quienes-somos"]'),
       [...doc.querySelectorAll('footer.pie a')].map(a => a.getAttribute('href')).join(' '));
+
     dom.window.close();
+  }
+  {
+    /* Los estilos del pie vivieron un tiempo en css/index.css, que solo carga
+       la portada: el pie salía sin formato en las otras once páginas. No se
+       comprueba con getComputedStyle porque jsdom no resuelve var(--color);
+       se comprueba el invariante de verdad: toda página que monte el pie tiene
+       que cargar una hoja que lo defina. */
+    const hojaConPie = ['base', 'navbar', 'index', 'paginas']
+      .filter(h => /^\.pie\s*\{/m.test(fs.readFileSync(`${FRONT}/css/${h}.css`, 'utf8')));
+    comprobar('Los estilos del pie están en una sola hoja', hojaConPie.length === 1, hojaConPie.join(', '));
+
+    const sinEstilos = fs.readdirSync(FRONT)
+      .filter(f => f.endsWith('.html') && fs.statSync(`${FRONT}/${f}`).size > 0)
+      .filter(f => {
+        const html = fs.readFileSync(`${FRONT}/${f}`, 'utf8');
+        if (!html.includes('id="pie"')) return false;
+        return !hojaConPie.some(h => html.includes(`css/${h}.css`));
+      });
+    comprobar('Todas las páginas con pie cargan esa hoja',
+      sinEstilos.length === 0, sinEstilos.join(', ') + ' se ven sin formato');
   }
   {
     const { doc, errs, dom } = await abrir('404.html', 1500);
