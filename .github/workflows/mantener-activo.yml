@@ -15,7 +15,10 @@ name: Mantener servicios activos
 
 on:
   schedule:
-    - cron: '0 12 * * 1'   # lunes 12:00 UTC (08:00 en Chile continental)
+    # Diario, no semanal. Supabase pausa a los 7 dias y GitHub retrasa las
+    # tareas programadas cuando tiene carga: un ciclo semanal se pasaba del
+    # limite y llegaban los avisos de pausa.
+    - cron: '0 12 * * *'   # todos los dias 12:00 UTC (08:00 en Chile)
   workflow_dispatch:        # permite lanzarlo a mano desde la pestana Actions
 
 jobs:

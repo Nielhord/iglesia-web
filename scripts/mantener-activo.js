@@ -1,7 +1,7 @@
 /**
  * Evita que los servicios gratuitos se pausen por inactividad.
  *
- * Supabase (Free) se pausa a los 7 dias sin peticiones.
+ * Supabase (Free) se pausa a los 7 dias sin peticiones A LA BASE DE DATOS.
  * MongoDB Atlas (M0) se pausa a los 60 dias sin conexiones.
  * Cualquier acceso reinicia el contador, asi que basta con tocarlos.
  *
@@ -38,9 +38,24 @@ async function despertarSupabase() {
   const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false },
   });
-  const { data, error } = await sb.storage.from(SUPABASE_BUCKET).list('', { limit: 1 });
+  const { error } = await sb.storage.from(SUPABASE_BUCKET).list('', { limit: 1 });
   if (error) throw error;
-  return `bucket "${SUPABASE_BUCKET}" accesible`;
+
+  // Tocar el almacenamiento NO basta: Supabase mide la inactividad sobre todo
+  // por la base de datos, y este proyecto solo usa Storage. Una peticion a
+  // PostgREST sí llega a Postgres y cuenta como actividad. Sin esto llegan los
+  // avisos de "su proyecto sera pausado" aunque el bucket se use.
+  const respuesta = await fetch(`${SUPABASE_URL}/rest/v1/`, {
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+    }
+  });
+  if (!respuesta.ok) {
+    throw new Error(`PostgREST respondio ${respuesta.status}`);
+  }
+
+  return `bucket "${SUPABASE_BUCKET}" accesible + base de datos consultada`;
 }
 
 (async () => {
